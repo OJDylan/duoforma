@@ -178,8 +178,8 @@
       const b = Number(node.dataset.b);
       const ra = state.cellEls[a].getBoundingClientRect();
       const rb = state.cellEls[b].getBoundingClientRect();
-      const cx = (ra.left + ra.right + rb.left + rb.right) / 4 - boardRect.left;
-      const cy = (ra.top + ra.bottom + rb.top + rb.bottom) / 4 - boardRect.top;
+      const cx = Math.round((ra.left + ra.right + rb.left + rb.right) / 4 - boardRect.left);
+      const cy = Math.round((ra.top + ra.bottom + rb.top + rb.bottom) / 4 - boardRect.top);
       node.style.left = cx + "px";
       node.style.top = cy + "px";
     }
