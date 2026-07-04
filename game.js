@@ -208,12 +208,52 @@
   }
 
   // ---------- daily: puzzle generation (deterministic, cached) ----------
+  // A puzzle's "identity" is its starting board: the given clues plus the set
+  // of constraint badges. Two puzzles with the same signature are the exact
+  // same thing to solve. Order-independent so bank/daily encodings compare
+  // equal regardless of how constraints were listed.
+  function puzzleSignature(given, constraints) {
+    const cons = constraints
+      .map((c) => Math.min(c[0], c[1]) + "," + Math.max(c[0], c[1]) + "," + c[2])
+      .sort()
+      .join("|");
+    return given + "#" + cons;
+  }
+
+  // Signatures of every puzzle in the fixed level bank, built once. Used to
+  // guarantee a Daily is never an exact duplicate of a leveled puzzle.
+  let bankSignatures = null;
+  function getBankSignatures() {
+    if (bankSignatures) return bankSignatures;
+    bankSignatures = new Set();
+    if (LEVELS) {
+      for (const diff of Object.keys(LEVELS)) {
+        for (const lv of LEVELS[diff]) {
+          bankSignatures.add(puzzleSignature(lv.given, lv.constraints));
+        }
+      }
+    }
+    return bankSignatures;
+  }
+
   const dailyCache = {};
   function getDailyPuzzle(dateStr) {
     if (dailyCache[dateStr]) return dailyCache[dateStr];
     if (!window.DuoformaGen) return null;
     const tier = dailyTierFor(dateStr);
-    const p = window.DuoformaGen.generate("duoforma-daily-" + dateStr, tier);
+    const bank = getBankSignatures();
+    // Deterministically re-seed if a generated board ever matches a bank
+    // puzzle, so the Daily is never identical to a leveled one. This salted
+    // fallback is virtually never needed (verified across years of dailies),
+    // but it makes the "always different" guarantee airtight.
+    let p = null;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const seed = "duoforma-daily-" + dateStr + (attempt ? "-v" + attempt : "");
+      const cand = window.DuoformaGen.generate(seed, tier);
+      if (!cand) break;
+      p = cand;
+      if (!bank.has(puzzleSignature(cand.given, cand.constraints))) break;
+    }
     if (!p) return null;
     const level = {
       id: "daily-" + dateStr,
@@ -231,9 +271,13 @@
     const dates = Object.keys(results);
     const played = dates.length;
     let fastest = Infinity;
+    // Streaks only count dailies solved on their own live day. Archived
+    // (previous-day) plays are practice: playable and shareable, but they
+    // never build or restore a streak. Legacy results (no `live` field) are
+    // grandfathered in as live so existing streaks aren't wiped.
     const dayNums = new Set();
     for (const ds of dates) {
-      dayNums.add(dayNumber(ds));
+      if (results[ds].live !== false) dayNums.add(dayNumber(ds));
       const t = results[ds].time;
       if (typeof t === "number" && t < fastest) fastest = t;
     }
@@ -649,22 +693,28 @@
 
   function onWinDaily() {
     const meta = state.dailyMeta;
-    // Record only the first official completion so replays don't overwrite it.
+    // Only today's live daily builds your streak; past days are practice.
+    const isLiveToday = state.dailyOffset === 0;
+    // Record only the first completion so replays don't overwrite it.
     const prior = dailyData.results[meta.dateStr];
     if (!prior) {
       dailyData.results[meta.dateStr] = {
         time: state.elapsed,
         hints: state.hintsUsed,
         tier: meta.tier,
+        live: isLiveToday,
       };
       saveDaily();
     }
     updateStatus();
     const result = dailyData.results[meta.dateStr];
     const stats = computeDailyStats();
+    let note = "";
+    if (!isLiveToday) note = " · practice — streak unaffected";
+    else if (prior) note = " · (already logged — replay)";
     el.winStats.textContent =
       `Daily #${meta.number} · ${meta.label} · ${formatTime(result.time)} · ${hintsLabel(result.hints)}` +
-      (prior ? " · (already logged — replay)" : "");
+      note;
     el.winShareCard.textContent = buildShareText(meta.dateStr, result, stats);
     el.winShareCard.hidden = false;
     el.winShareLabel.textContent = "Share your time";
