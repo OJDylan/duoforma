@@ -681,8 +681,17 @@
     el.winStats.textContent =
       `${cap(state.diff)} · Level ${state.index + 1} · ${t}` +
       (state.hintsUsed ? ` · ${state.hintsUsed} hint${state.hintsUsed > 1 ? "s" : ""}` : " · no hints");
-    el.winShare.hidden = true;
-    el.winShareCard.hidden = true;
+    const shareInfo = {
+      diff: state.diff,
+      index: state.index,
+      time: state.elapsed,
+      hints: state.hintsUsed,
+    };
+    el.winShareCard.textContent = buildLevelShareText(shareInfo);
+    el.winShareCard.hidden = false;
+    el.winShareLabel.textContent = "Share your time";
+    el.winShare.hidden = false;
+    el.winShare.onclick = () => shareLevel(shareInfo);
     el.winNext.textContent = "Next puzzle →";
     el.winModal.hidden = false;
   }
@@ -747,6 +756,30 @@
     // Deep-link straight to this day's daily so friends play the same board.
     lines.push(`Beat my time → ${siteUrl()}?daily=${dateStr}`);
     return lines.join("\n");
+  }
+
+  function buildLevelShareText(info) {
+    const lines = [
+      `Duoforma · ${cap(info.diff)} · Level ${info.index + 1}`,
+      `⏱ ${formatTime(info.time)} · ${hintsLabel(info.hints)}`,
+      `Beat my time → ${siteUrl()}`,
+    ];
+    return lines.join("\n");
+  }
+
+  async function shareLevel(info) {
+    const text = buildLevelShareText(info);
+    // Native share sheet on supported (mostly mobile) devices, else clipboard.
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Duoforma", text });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return; // user dismissed
+      }
+    }
+    const ok = await copyText(text);
+    showBanner(ok ? "Result copied — paste to share!" : "Couldn't copy result.", ok ? "good" : "bad");
   }
 
   async function shareDaily(dateStr) {
