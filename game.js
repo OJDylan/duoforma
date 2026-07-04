@@ -269,6 +269,15 @@
     }
     wireEvents();
     applyValidateUI();
+    // A shared link (?daily or ?daily=YYYY-MM-DD) always opens on the Daily
+    // tab, deep-linking to the specific day when one is given.
+    const deepLink = window.DuoformaGen ? parseDailyDeepLink() : null;
+    if (deepLink) {
+      localStorage.setItem(MODE_KEY, "daily");
+      loadDaily(deepLink.dateStr ? offsetForDateStr(deepLink.dateStr) : 0);
+      window.addEventListener("resize", positionConstraints);
+      return;
+    }
     let mode = localStorage.getItem(MODE_KEY);
     // New visitors land on the Daily puzzle to showcase it; the ★ Daily tab
     // stays available for everyone. Fall back to easy if the generator is
@@ -368,6 +377,34 @@
 
   function shiftDaily(delta) {
     loadDaily(state.dailyOffset + delta);
+  }
+
+  // Archive offset (0 = today, negative = past) that reaches the given date.
+  function offsetForDateStr(dateStr) {
+    return dayNumber(dateStr) - dayNumber(dateStrForOffset(0));
+  }
+
+  // Jump straight to a specific day's daily (used by the archive list and by
+  // shared deep-links). Records the choice so a reload stays on the daily tab.
+  function loadDailyDate(dateStr) {
+    if (!window.DuoformaGen) return;
+    localStorage.setItem(MODE_KEY, "daily");
+    loadDaily(offsetForDateStr(dateStr));
+  }
+
+  // Read an optional deep-link that points at the daily tab. Supports
+  //   ?daily            -> today's daily
+  //   ?daily=YYYY-MM-DD -> a specific (past) daily
+  function parseDailyDeepLink() {
+    try {
+      const params = new URLSearchParams(location.search);
+      if (!params.has("daily")) return null;
+      const val = params.get("daily");
+      if (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) return { dateStr: val };
+      return { dateStr: null }; // today
+    } catch (e) {
+      return null;
+    }
   }
 
   function resetHintMode() {
@@ -657,7 +694,8 @@
       `⏱ ${formatTime(result.time)} · ${hintsLabel(result.hints)}`,
     ];
     if (stats && stats.current > 1) lines.push(`🔥 ${stats.current}-day streak`);
-    lines.push(`Beat my time → ${siteUrl()}`);
+    // Deep-link straight to this day's daily so friends play the same board.
+    lines.push(`Beat my time → ${siteUrl()}?daily=${dateStr}`);
     return lines.join("\n");
   }
 
@@ -721,9 +759,9 @@
       const num = dayNumber(ds);
       const right = res
         ? `<span class="hist-time">${formatTime(res.time)}</span>`
-        : `<span class="hist-open">not played</span>`;
+        : `<span class="hist-open">play ›</span>`;
       html +=
-        `<li class="hist-row${res ? " done" : ""}">` +
+        `<li class="hist-row play${res ? " done" : ""}" data-date="${ds}" role="button" tabindex="0" title="Play this day">` +
         `<span class="hist-day">#${num} · ${weekdayLabel(ds)}</span>` +
         `<span class="hist-diff">${DAILY_TIER_LABELS[tier]}</span>` +
         right +
@@ -1136,6 +1174,23 @@
     el.statsBtn.addEventListener("click", openStats);
     el.closeStats.addEventListener("click", () => (el.statsModal.hidden = true));
     el.dailyStreak.addEventListener("click", openStats);
+
+    // Tap a row in "Recent dailies" to replay that day's puzzle.
+    const playHistoryRow = (row) => {
+      if (!row || !row.dataset.date) return;
+      el.statsModal.hidden = true;
+      loadDailyDate(row.dataset.date);
+    };
+    el.statsHistory.addEventListener("click", (e) =>
+      playHistoryRow(e.target.closest(".hist-row"))
+    );
+    el.statsHistory.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const row = e.target.closest(".hist-row");
+      if (!row) return;
+      e.preventDefault();
+      playHistoryRow(row);
+    });
 
     el.levelBtn.addEventListener("click", () => (isDaily() ? openStats() : openLevelModal()));
     el.closeModal.addEventListener("click", () => (el.levelModal.hidden = true));
