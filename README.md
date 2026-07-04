@@ -16,6 +16,23 @@ Fill every cell of the 6×6 grid with a blue circle or a red triangle so that:
 
 Every puzzle has exactly one solution and is solvable with logic alone (no guessing).
 
+## Daily puzzle & sharing
+
+Tap **★ Daily** for a fresh puzzle that is the **same for everyone, every day** — it's generated in your browser from a date seed, so no server or account is needed. The difficulty rotates through the week (easy warm-ups, medium mid-week, harder on Thursdays/Fridays).
+
+- **Archive** — use `‹` / `›` (or `←` / `→`) to replay any previous day's daily.
+- **Streaks & stats** — the bar-chart icon (top-right) opens your daily stats: games played, current and best streak, fastest time, and a history of recent dailies. Your current streak also shows under the board.
+- **Share your time** — after solving the daily, hit **Share your time** (or **Share your results** in the stats panel). On phones this opens the native share sheet; elsewhere it copies a spoiler-free summary to your clipboard so you can post your time and compare with friends:
+
+  ```
+  Duoforma Daily #550 ★ Medium
+  ⏱ 2:34 · no hints
+  🔥 3-day streak
+  Beat my time → https://your-site/
+  ```
+
+Everyone playing the same day gets the identical board, so times are directly comparable. Daily results are stored locally in your browser.
+
 **Controls**
 
 - Click/tap a cell to cycle: empty → circle → triangle → empty.
@@ -56,6 +73,7 @@ node validate-levels.js                 # sanity-check uniqueness & rules (exits
 ## Files
 
 - `index.html` / `styles.css` / `game.js` — the game.
+- `puzzle-gen.js` — deterministic, seeded in-browser puzzle generator that powers the Daily puzzle (a port of `generate-levels.js`; same seed ⇒ same puzzle in every browser).
 - `levels.json` — generated puzzle bank (`{ easy, medium, hard }`).
 - `generate-levels.js` — puzzle generator + solver + difficulty rater.
 - `validate-levels.js` — verifies every level is valid and uniquely solvable.

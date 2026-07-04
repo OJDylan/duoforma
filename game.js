@@ -7,8 +7,17 @@
   const DIFFS = ["easy", "medium", "hard", "expert"];
   const STORE_KEY = "duoforma-progress-v1";
   const THEME_KEY = "duoforma-theme-v1";
+  const MODE_KEY = "duoforma-mode-v1"; // last selected mode/difficulty
+  const DAILY_KEY = "duoforma-daily-v1"; // per-day results + streaks
   const ERROR_DELAY = 1000; // ms of inactivity before rule violations are highlighted
   const HINT_COOLDOWN = 10000; // ms before Hint can be used again
+
+  // Daily puzzle: everyone gets the same procedurally generated board each day.
+  // Day #1 is the epoch below; difficulty rotates through the week for variety.
+  const DAILY_EPOCH = "2025-01-01";
+  const DAILY_TIER_LABELS = ["Easy", "Medium", "Hard"];
+  // Indexed by day of week (0 = Sunday). Values are generator tiers (0/1/2).
+  const DAILY_ROTATION = [1, 0, 1, 1, 2, 2, 1];
 
   // Board dimensions are derived per level (6x6 for easy/medium/hard, 8x8 for
   // expert). N/CELLS/HALF/LINES are rebuilt whenever the size changes.
@@ -47,6 +56,8 @@
     timer: document.getElementById("timer"),
     levelLabel: document.getElementById("levelLabel"),
     levelDone: document.getElementById("levelDone"),
+    dailyDiff: document.getElementById("dailyDiff"),
+    dailyStreak: document.getElementById("dailyStreak"),
     prevBtn: document.getElementById("prevBtn"),
     nextBtn: document.getElementById("nextBtn"),
     levelBtn: document.getElementById("levelBtn"),
@@ -69,6 +80,18 @@
     winStats: document.getElementById("winStats"),
     winNext: document.getElementById("winNext"),
     winClose: document.getElementById("winClose"),
+    winShare: document.getElementById("winShare"),
+    winShareLabel: document.getElementById("winShareLabel"),
+    winShareCard: document.getElementById("winShareCard"),
+    statsBtn: document.getElementById("statsBtn"),
+    statsModal: document.getElementById("statsModal"),
+    closeStats: document.getElementById("closeStats"),
+    statPlayed: document.getElementById("statPlayed"),
+    statStreak: document.getElementById("statStreak"),
+    statBest: document.getElementById("statBest"),
+    statFastest: document.getElementById("statFastest"),
+    statsHistory: document.getElementById("statsHistory"),
+    statsShare: document.getElementById("statsShare"),
     clearModal: document.getElementById("clearModal"),
     clearCancel: document.getElementById("clearCancel"),
     clearConfirm: document.getElementById("clearConfirm"),
@@ -82,6 +105,9 @@
   const state = {
     diff: "easy",
     index: 0,
+    daily: false, // true when the Daily puzzle is loaded
+    dailyOffset: 0, // 0 = today, -1 = yesterday, ... (archive)
+    dailyMeta: null, // { dateStr, number, tier, label }
     level: null,
     grid: new Int8Array(CELLS).fill(EMPTY),
     locked: new Array(CELLS).fill(false),
@@ -124,6 +150,112 @@
     return new Set(progress[diff].solved);
   }
 
+  // ---------- daily: persistence ----------
+  // dailyData.results maps "YYYY-MM-DD" -> { time: ms, hints: n, tier: t }.
+  function loadDailyData() {
+    let d = null;
+    try {
+      const raw = localStorage.getItem(DAILY_KEY);
+      if (raw) d = JSON.parse(raw);
+    } catch (e) {}
+    if (!d || typeof d !== "object") d = {};
+    if (!d.results || typeof d.results !== "object") d.results = {};
+    return d;
+  }
+  let dailyData = loadDailyData();
+  function saveDaily() {
+    try {
+      localStorage.setItem(DAILY_KEY, JSON.stringify(dailyData));
+    } catch (e) {}
+  }
+
+  // ---------- daily: date helpers ----------
+  function isDaily() {
+    return state.daily;
+  }
+  function midnight(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+  function dateToStr(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  function parseDateStr(str) {
+    const [y, m, d] = str.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  function dayNumber(dateStr) {
+    const epochMs = midnight(parseDateStr(DAILY_EPOCH)).getTime();
+    const ms = midnight(parseDateStr(dateStr)).getTime();
+    return Math.round((ms - epochMs) / 86400000) + 1; // day #1 == epoch
+  }
+  function dateStrForOffset(offset) {
+    const t = midnight(new Date());
+    t.setDate(t.getDate() + offset);
+    return dateToStr(t);
+  }
+  function dailyTierFor(dateStr) {
+    return DAILY_ROTATION[parseDateStr(dateStr).getDay()];
+  }
+  function weekdayLabel(dateStr) {
+    return parseDateStr(dateStr).toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  // ---------- daily: puzzle generation (deterministic, cached) ----------
+  const dailyCache = {};
+  function getDailyPuzzle(dateStr) {
+    if (dailyCache[dateStr]) return dailyCache[dateStr];
+    if (!window.DuoformaGen) return null;
+    const tier = dailyTierFor(dateStr);
+    const p = window.DuoformaGen.generate("duoforma-daily-" + dateStr, tier);
+    if (!p) return null;
+    const level = {
+      id: "daily-" + dateStr,
+      given: p.given,
+      solution: p.solution,
+      constraints: p.constraints,
+    };
+    dailyCache[dateStr] = level;
+    return level;
+  }
+
+  // ---------- daily: streak stats ----------
+  function computeDailyStats() {
+    const results = dailyData.results;
+    const dates = Object.keys(results);
+    const played = dates.length;
+    let fastest = Infinity;
+    const dayNums = new Set();
+    for (const ds of dates) {
+      dayNums.add(dayNumber(ds));
+      const t = results[ds].time;
+      if (typeof t === "number" && t < fastest) fastest = t;
+    }
+    // best streak: longest run of consecutive day numbers
+    let best = 0;
+    for (const n of dayNums) {
+      if (dayNums.has(n - 1)) continue; // not a run start
+      let len = 1;
+      while (dayNums.has(n + len)) len++;
+      if (len > best) best = len;
+    }
+    // current streak: consecutive days ending today (or yesterday, grace period)
+    const today = dayNumber(dateStrForOffset(0));
+    let cur = 0;
+    let anchor = dayNums.has(today) ? today : dayNums.has(today - 1) ? today - 1 : null;
+    if (anchor != null) {
+      cur = 1;
+      while (dayNums.has(anchor - cur)) cur++;
+    }
+    return { played, best, current: cur, fastest: fastest === Infinity ? null : fastest };
+  }
+
   // ---------- init ----------
   async function init() {
     applyTheme(localStorage.getItem(THEME_KEY) === "dark");
@@ -137,8 +269,13 @@
     }
     wireEvents();
     applyValidateUI();
-    state.diff = "easy";
-    loadLevel(clampIndex(progress.easy.last || 0));
+    let mode = localStorage.getItem(MODE_KEY);
+    // New visitors land on the Daily puzzle to showcase it; the ★ Daily tab
+    // stays available for everyone. Fall back to easy if the generator is
+    // unavailable (e.g. opened without puzzle-gen.js).
+    if (!mode) mode = window.DuoformaGen ? "daily" : "easy";
+    if (mode === "daily" && !window.DuoformaGen) mode = "easy";
+    selectDiff(mode);
     window.addEventListener("resize", positionConstraints);
   }
 
@@ -165,11 +302,8 @@
   }
 
   // ---------- load a level ----------
-  function loadLevel(index) {
-    state.index = clampIndex(index);
-    state.level = LEVELS[state.diff][state.index];
-
-    // adapt board to this level's size (6x6 or 8x8), rebuilding the shell if needed
+  // Apply the current state.level to the board (shared by bank + daily modes).
+  function applyLevelToBoard() {
     const n = Math.round(Math.sqrt(state.level.given.length));
     if (n !== builtSize) {
       setBoardSize(n);
@@ -189,8 +323,6 @@
         state.locked[i] = true;
       }
     }
-    progress[state.diff].last = state.index;
-    saveProgress();
 
     resetTimer();
     resetHintCooldown();
@@ -199,6 +331,43 @@
     render();
     updateStatus();
     hideBanner();
+  }
+
+  function loadLevel(index) {
+    state.daily = false;
+    state.index = clampIndex(index);
+    state.level = LEVELS[state.diff][state.index];
+    progress[state.diff].last = state.index;
+    saveProgress();
+    applyLevelToBoard();
+  }
+
+  // Load the daily puzzle for the given archive offset (0 = today).
+  function loadDaily(offset) {
+    if (offset > 0) offset = 0; // never load a future day
+    const earliest = 1 - dayNumber(dateStrForOffset(0)); // offset that reaches day #1
+    if (offset < earliest) offset = earliest;
+    const dateStr = dateStrForOffset(offset);
+    const level = getDailyPuzzle(dateStr);
+    if (!level) {
+      showBanner("Daily puzzle unavailable.", "bad");
+      return;
+    }
+    state.daily = true;
+    state.dailyOffset = offset;
+    state.diff = "daily";
+    state.level = level;
+    state.dailyMeta = {
+      dateStr,
+      number: dayNumber(dateStr),
+      tier: dailyTierFor(dateStr),
+      label: DAILY_TIER_LABELS[dailyTierFor(dateStr)],
+    };
+    applyLevelToBoard();
+  }
+
+  function shiftDaily(delta) {
+    loadDaily(state.dailyOffset + delta);
   }
 
   function resetHintMode() {
@@ -421,6 +590,7 @@
     stopTimer();
     cancelErrorDisplay();
     clearErrorStyles();
+    if (isDaily()) return onWinDaily();
     const set = solvedSet(state.diff);
     set.add(state.level.id);
     progress[state.diff].solved = [...set];
@@ -430,7 +600,148 @@
     el.winStats.textContent =
       `${cap(state.diff)} · Level ${state.index + 1} · ${t}` +
       (state.hintsUsed ? ` · ${state.hintsUsed} hint${state.hintsUsed > 1 ? "s" : ""}` : " · no hints");
+    el.winShare.hidden = true;
+    el.winShareCard.hidden = true;
+    el.winNext.textContent = "Next puzzle →";
     el.winModal.hidden = false;
+  }
+
+  function hintsLabel(n) {
+    return n ? `${n} hint${n > 1 ? "s" : ""}` : "no hints";
+  }
+
+  function onWinDaily() {
+    const meta = state.dailyMeta;
+    // Record only the first official completion so replays don't overwrite it.
+    const prior = dailyData.results[meta.dateStr];
+    if (!prior) {
+      dailyData.results[meta.dateStr] = {
+        time: state.elapsed,
+        hints: state.hintsUsed,
+        tier: meta.tier,
+      };
+      saveDaily();
+    }
+    updateStatus();
+    const result = dailyData.results[meta.dateStr];
+    const stats = computeDailyStats();
+    el.winStats.textContent =
+      `Daily #${meta.number} · ${meta.label} · ${formatTime(result.time)} · ${hintsLabel(result.hints)}` +
+      (prior ? " · (already logged — replay)" : "");
+    el.winShareCard.textContent = buildShareText(meta.dateStr, result, stats);
+    el.winShareCard.hidden = false;
+    el.winShareLabel.textContent = "Share your time";
+    el.winShare.hidden = false;
+    el.winShare.onclick = () => shareDaily(meta.dateStr);
+    // In daily mode "Next" surfaces the social stats view instead of a next level.
+    el.winNext.textContent = "View stats →";
+    el.winModal.hidden = false;
+  }
+
+  // ---------- daily: sharing (no backend — copy/native share) ----------
+  function siteUrl() {
+    try {
+      return location.origin && location.origin !== "null"
+        ? location.origin + location.pathname
+        : "https://duoforma.game";
+    } catch (e) {
+      return "https://duoforma.game";
+    }
+  }
+
+  function buildShareText(dateStr, result, stats) {
+    const num = dayNumber(dateStr);
+    const label = DAILY_TIER_LABELS[dailyTierFor(dateStr)];
+    const lines = [
+      `Duoforma Daily #${num} ★ ${label}`,
+      `⏱ ${formatTime(result.time)} · ${hintsLabel(result.hints)}`,
+    ];
+    if (stats && stats.current > 1) lines.push(`🔥 ${stats.current}-day streak`);
+    lines.push(`Beat my time → ${siteUrl()}`);
+    return lines.join("\n");
+  }
+
+  async function shareDaily(dateStr) {
+    const result = dailyData.results[dateStr];
+    if (!result) {
+      showBanner("Solve today's daily first!", "bad");
+      return;
+    }
+    const text = buildShareText(dateStr, result, computeDailyStats());
+    // Native share sheet on supported (mostly mobile) devices, else clipboard.
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Duoforma Daily", text });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return; // user dismissed
+      }
+    }
+    const ok = await copyText(text);
+    showBanner(ok ? "Result copied — paste to share!" : "Couldn't copy result.", ok ? "good" : "bad");
+  }
+
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) {}
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ---------- daily: stats modal ----------
+  function openStats() {
+    const stats = computeDailyStats();
+    el.statPlayed.textContent = stats.played;
+    el.statStreak.textContent = stats.current;
+    el.statBest.textContent = stats.best;
+    el.statFastest.textContent = stats.fastest == null ? "–" : formatTime(stats.fastest);
+
+    let html = "";
+    for (let off = 0; off > -14; off--) {
+      const ds = dateStrForOffset(off);
+      if (dayNumber(ds) < 1) break;
+      const res = dailyData.results[ds];
+      const tier = dailyTierFor(ds);
+      const num = dayNumber(ds);
+      const right = res
+        ? `<span class="hist-time">${formatTime(res.time)}</span>`
+        : `<span class="hist-open">not played</span>`;
+      html +=
+        `<li class="hist-row${res ? " done" : ""}">` +
+        `<span class="hist-day">#${num} · ${weekdayLabel(ds)}</span>` +
+        `<span class="hist-diff">${DAILY_TIER_LABELS[tier]}</span>` +
+        right +
+        `</li>`;
+    }
+    el.statsHistory.innerHTML = html;
+
+    // Share the most recent completed daily (today if done, else latest).
+    let shareDate = null;
+    for (let off = 0; off > -400; off--) {
+      const ds = dateStrForOffset(off);
+      if (dayNumber(ds) < 1) break;
+      if (dailyData.results[ds]) { shareDate = ds; break; }
+    }
+    el.statsShare.disabled = !shareDate;
+    el.statsShare.onclick = () => shareDate && shareDaily(shareDate);
+
+    el.statsModal.hidden = false;
   }
 
   // ---------- hint (teaching mode) ----------
@@ -680,19 +991,56 @@
   }
 
   // ---------- status / nav ----------
+  function setActiveTab(mode) {
+    document.querySelectorAll(".diff-tab").forEach((t) => {
+      t.classList.toggle("is-active", t.dataset.diff === mode);
+    });
+  }
+
   function updateStatus() {
+    if (isDaily()) return updateStatusDaily();
     el.levelLabel.textContent = "Level " + (state.index + 1);
+    el.dailyDiff.hidden = true;
+    el.dailyStreak.hidden = true;
+    el.randomBtn.style.display = ""; // .nav-btn display beats the [hidden] attr
+    el.levelBtn.title = "Pick a level";
     const set = solvedSet(state.diff);
     el.levelDone.hidden = !set.has(state.level.id);
     el.prevBtn.disabled = state.index === 0;
     el.nextBtn.disabled = state.index === LEVELS[state.diff].length - 1;
     el.progressText.textContent = `${set.size} / ${LEVELS[state.diff].length} solved`;
-    DIFFS.forEach((d) => {
-      document.querySelector(`.diff-tab[data-diff="${d}"]`).classList.toggle("is-active", d === state.diff);
-    });
+    setActiveTab(state.diff);
+  }
+
+  function updateStatusDaily() {
+    const meta = state.dailyMeta;
+    el.levelLabel.textContent = meta.dateStr === dateStrForOffset(0) ? "Today" : weekdayLabel(meta.dateStr);
+    el.dailyDiff.textContent = meta.label;
+    el.dailyDiff.hidden = false;
+    el.randomBtn.style.display = "none";
+    el.levelBtn.title = "Daily stats";
+    const done = !!dailyData.results[meta.dateStr];
+    el.levelDone.hidden = !done;
+    el.prevBtn.disabled = meta.number <= 1; // can't go before day #1
+    el.nextBtn.disabled = state.dailyOffset >= 0; // can't go past today
+    el.progressText.textContent = `Daily #${meta.number}`;
+    const stats = computeDailyStats();
+    if (stats.current > 0) {
+      el.dailyStreak.textContent = `🔥 ${stats.current}-day streak`;
+      el.dailyStreak.hidden = false;
+    } else {
+      el.dailyStreak.hidden = true;
+    }
+    setActiveTab("daily");
   }
 
   function selectDiff(diff) {
+    localStorage.setItem(MODE_KEY, diff);
+    if (diff === "daily") {
+      loadDaily(0);
+      return;
+    }
+    state.daily = false;
     state.diff = diff;
     loadLevel(clampIndex(progress[diff].last || 0));
   }
@@ -773,19 +1121,23 @@
       if (!("ontouchstart" in window)) cycle(Number(cell.dataset.i), true);
     });
 
-    el.prevBtn.addEventListener("click", () => loadLevel(state.index - 1));
-    el.nextBtn.addEventListener("click", () => loadLevel(state.index + 1));
+    el.prevBtn.addEventListener("click", () => (isDaily() ? shiftDaily(-1) : loadLevel(state.index - 1)));
+    el.nextBtn.addEventListener("click", () => (isDaily() ? shiftDaily(1) : loadLevel(state.index + 1)));
     el.undoBtn.addEventListener("click", undo);
     el.clearBtn.addEventListener("click", requestClear);
     el.hintBtn.addEventListener("click", hint);
     el.checkBtn.addEventListener("click", check);
     el.randomBtn.addEventListener("click", () => loadLevel((Math.random() * LEVELS[state.diff].length) | 0));
 
-    DIFFS.forEach((d) => {
-      document.querySelector(`.diff-tab[data-diff="${d}"]`).addEventListener("click", () => selectDiff(d));
+    document.querySelectorAll(".diff-tab").forEach((tab) => {
+      tab.addEventListener("click", () => selectDiff(tab.dataset.diff));
     });
 
-    el.levelBtn.addEventListener("click", openLevelModal);
+    el.statsBtn.addEventListener("click", openStats);
+    el.closeStats.addEventListener("click", () => (el.statsModal.hidden = true));
+    el.dailyStreak.addEventListener("click", openStats);
+
+    el.levelBtn.addEventListener("click", () => (isDaily() ? openStats() : openLevelModal()));
     el.closeModal.addEventListener("click", () => (el.levelModal.hidden = true));
     el.levelGrid.addEventListener("click", (e) => {
       const b = e.target.closest(".level-cell");
@@ -809,11 +1161,15 @@
 
     el.winNext.addEventListener("click", () => {
       el.winModal.hidden = true;
-      if (state.index < LEVELS[state.diff].length - 1) loadLevel(state.index + 1);
+      if (isDaily()) {
+        openStats();
+      } else if (state.index < LEVELS[state.diff].length - 1) {
+        loadLevel(state.index + 1);
+      }
     });
     el.winClose.addEventListener("click", () => (el.winModal.hidden = true));
 
-    [el.levelModal, el.helpModal, el.winModal, el.clearModal].forEach((m) => {
+    [el.levelModal, el.helpModal, el.winModal, el.clearModal, el.statsModal].forEach((m) => {
       m.addEventListener("click", (e) => {
         if (e.target === m) m.hidden = true;
       });
@@ -821,8 +1177,8 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.target.tagName === "INPUT") return;
-      if (e.key === "ArrowLeft") loadLevel(state.index - 1);
-      else if (e.key === "ArrowRight") loadLevel(state.index + 1);
+      if (e.key === "ArrowLeft") isDaily() ? shiftDaily(-1) : loadLevel(state.index - 1);
+      else if (e.key === "ArrowRight") isDaily() ? shiftDaily(1) : loadLevel(state.index + 1);
       else if (e.key.toLowerCase() === "z" && (e.metaKey || e.ctrlKey)) undo();
       else if (e.key === "Escape") {
         if (state.hintMode) exitHintMode();
@@ -830,6 +1186,7 @@
         el.helpModal.hidden = true;
         el.winModal.hidden = true;
         el.clearModal.hidden = true;
+        el.statsModal.hidden = true;
       }
     });
   }

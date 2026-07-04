@@ -183,6 +183,22 @@ body {
   color: var(--ink);
   box-shadow: 0 1px 3px rgba(17,24,39,.12);
 }
+/* Daily tab: accent-tinted so it stands out from the difficulty tabs */
+.daily-tab { color: var(--accent); font-weight: 700; }
+.daily-tab.is-active { color: var(--accent); box-shadow: 0 1px 3px rgba(99,102,241,.28); }
+
+/* daily difficulty badge inside the level chip */
+.daily-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.daily-badge[hidden] { display: none; }
 
 /* ---------- status bar ---------- */
 .statusbar {
@@ -581,17 +597,97 @@ body {
 }
 .danger-btn:hover { filter: brightness(1.06); }
 
+/* ---------- share ---------- */
+.share-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.share-btn svg { display: block; }
+.share-card {
+  white-space: pre-wrap;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+  font-variant-numeric: tabular-nums;
+}
+.share-card[hidden] { display: none; }
+
+/* ---------- daily stats modal ---------- */
+.stats-body { font-size: 14px; color: var(--ink); }
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-2);
+  border-radius: 12px;
+  padding: 12px 4px;
+}
+.stat-num {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.stat-lbl { font-size: 11px; color: var(--ink-soft); font-weight: 600; text-align: center; }
+.stats-sub {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin: 16px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.stats-history { list-style: none; margin: 0 0 14px; padding: 0; }
+.hist-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.hist-row:last-child { border-bottom: none; }
+.hist-day { color: var(--ink); font-weight: 600; }
+.hist-diff { color: var(--ink-soft); font-size: 12px; }
+.hist-time { font-weight: 800; color: var(--good); font-variant-numeric: tabular-nums; }
+.hist-open { color: var(--ink-soft); font-size: 12px; }
+.hist-row.done .hist-day { color: var(--ink); }
+.stats-history .share-btn { width: 100%; }
+.secondary-btn.share-btn:disabled { opacity: .5; cursor: default; }
+.stats-tip { color: var(--ink-soft); font-size: 12px; margin: 12px 0 0; text-align: center; }
+
 /* responsive */
 @media (max-width: 400px) {
   :root { --gap: 4px; }
   .brand h1 { font-size: 22px; }
   .board-wrap { padding: 12px; }
   .tool-btn { font-size: 12px; padding: 10px 4px; }
-  .diff-tab { font-size: 13px; }
+  .difficulty { padding: 3px; gap: 3px; }
+  .diff-tab { font-size: 12px; padding: 8px 0; }
 }
 @media (max-width: 340px) {
   .tool-btn .ico { font-size: 15px; }
-  .level-chip { min-width: 92px; padding: 8px 8px; }
+  .level-chip { min-width: 80px; padding: 8px 6px; }
+  .diff-tab { font-size: 11px; }
+  .stat-num { font-size: 18px; }
 }
 
 /* larger touch targets + no long-press callout on phones */
