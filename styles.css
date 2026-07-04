@@ -236,8 +236,11 @@ body {
   cursor: pointer;
   min-width: 108px;
   justify-content: center;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .level-chip:hover { border-color: var(--line-strong); }
+#levelLabel { white-space: nowrap; }
 .done-badge { color: var(--good); font-weight: 800; }
 .spacer { flex: 1; }
 .timer {
@@ -686,10 +689,12 @@ body {
   .tool-btn { font-size: 12px; padding: 10px 4px; }
   .difficulty { padding: 3px; gap: 3px; }
   .diff-tab { font-size: 12px; padding: 8px 0; }
+  .level-chip { font-size: 13px; padding: 8px 10px; }
+  .daily-badge { font-size: 10px; padding: 2px 6px; }
 }
 @media (max-width: 340px) {
   .tool-btn .ico { font-size: 15px; }
-  .level-chip { min-width: 80px; padding: 8px 6px; }
+  .level-chip { min-width: 80px; padding: 8px 6px; font-size: 12px; }
   .diff-tab { font-size: 11px; }
   .stat-num { font-size: 18px; }
 }
