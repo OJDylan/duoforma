@@ -20,18 +20,20 @@ Every puzzle has exactly one solution and is solvable with logic alone (no guess
 
 Tap **★ Daily** for a fresh puzzle that is the **same for everyone, every day** — it's generated in your browser from a date seed, so no server or account is needed. The difficulty rotates through the week (easy warm-ups, medium mid-week, harder on Thursdays/Fridays).
 
-- **Archive** — use `‹` / `›` (or `←` / `→`) to replay any previous day's daily.
-- **Streaks & stats** — the bar-chart icon (top-right) opens your daily stats: games played, current and best streak, fastest time, and a history of recent dailies. Your current streak also shows under the board.
+- **Archive** — use `‹` / `›` (or `←` / `→`) to step through previous days, or open the stats panel and **tap any day in _Recent dailies_** to jump straight to that puzzle and play it.
+- **Streaks & stats** — the bar-chart icon (top-right) opens your daily stats: games played, current and best streak, fastest time, and a history of recent dailies (each row is tappable to replay that day). Your current streak also shows under the board.
 - **Share your time** — after solving the daily, hit **Share your time** (or **Share your results** in the stats panel). On phones this opens the native share sheet; elsewhere it copies a spoiler-free summary to your clipboard so you can post your time and compare with friends:
 
   ```
   Duoforma Daily #550 ★ Medium
   ⏱ 2:34 · no hints
   🔥 3-day streak
-  Beat my time → https://your-site/
+  Beat my time → https://your-site/?daily=2026-07-04
   ```
 
 Everyone playing the same day gets the identical board, so times are directly comparable. Daily results are stored locally in your browser.
+
+The shared link ends with `?daily=YYYY-MM-DD`, so opening it drops your friends straight onto the **★ Daily** tab for that exact day's puzzle. (A bare `?daily` opens today's daily.)
 
 **Controls**
 

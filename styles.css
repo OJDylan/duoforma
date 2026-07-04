@@ -665,6 +665,10 @@ body {
   font-size: 13px;
 }
 .hist-row:last-child { border-bottom: none; }
+.hist-row.play { cursor: pointer; border-radius: 8px; transition: background .12s ease; }
+.hist-row.play:hover,
+.hist-row.play:focus-visible { background: var(--line); outline: none; }
+.hist-row.play:focus-visible { box-shadow: 0 0 0 2px var(--accent, #6366f1); }
 .hist-day { color: var(--ink); font-weight: 600; }
 .hist-diff { color: var(--ink-soft); font-size: 12px; }
 .hist-time { font-weight: 800; color: var(--good); font-variant-numeric: tabular-nums; }
