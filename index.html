@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3f4f6" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Duoforma" />
+  <title>Duoforma — Logic Puzzle</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <span class="mark-tri"></span><span class="mark-cir"></span>
+        </span>
+        <h1>Duoforma</h1>
+      </div>
+      <div class="top-actions">
+        <button id="validateBtn" class="ghost-btn" title="Hide validation (harder)" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <button id="helpBtn" class="ghost-btn" title="How to play">?</button>
+      </div>
+    </header>
+
+    <nav class="difficulty" role="tablist" aria-label="Difficulty">
+      <button class="diff-tab is-active" data-diff="easy" role="tab">Easy</button>
+      <button class="diff-tab" data-diff="medium" role="tab">Medium</button>
+      <button class="diff-tab" data-diff="hard" role="tab">Hard</button>
+    </nav>
+
+    <section class="statusbar">
+      <button id="prevBtn" class="nav-btn" title="Previous level">‹</button>
+      <button id="levelBtn" class="level-chip" title="Pick a level">
+        <span id="levelLabel">Level 1</span>
+        <span id="levelDone" class="done-badge" hidden>✓</span>
+      </button>
+      <button id="nextBtn" class="nav-btn" title="Next level">›</button>
+      <div class="spacer"></div>
+      <div class="timer" id="timer">0:00</div>
+    </section>
+
+    <main class="board-wrap">
+      <div id="board" class="board" aria-label="Duoforma board"></div>
+      <div id="banner" class="banner" hidden></div>
+    </main>
+
+    <section class="toolbar">
+      <button id="undoBtn" class="tool-btn"><span class="ico">↶</span>Undo</button>
+      <button id="clearBtn" class="tool-btn"><span class="ico">⟲</span>Clear</button>
+      <button id="hintBtn" class="tool-btn"><span class="ico">💡</span>Hint</button>
+      <button id="checkBtn" class="tool-btn"><span class="ico">✓</span>Check</button>
+    </section>
+
+    <footer class="foot">
+      <span id="progressText">0 / 500 solved</span>
+      <button id="randomBtn" class="link-btn">Random puzzle</button>
+    </footer>
+  </div>
+
+  <!-- Level picker modal -->
+  <div id="levelModal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="modalTitle">Easy — pick a level</h2>
+        <button id="closeModal" class="ghost-btn">✕</button>
+      </div>
+      <div id="levelGrid" class="level-grid"></div>
+    </div>
+  </div>
+
+  <!-- Help modal -->
+  <div id="helpModal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>How to play</h2>
+        <button id="closeHelp" class="ghost-btn">✕</button>
+      </div>
+      <div class="help-body">
+        <p>Fill every cell with a <b class="blue">blue circle</b> or a <b class="red">red triangle</b>.</p>
+        <ul>
+          <li>No more than <b>two</b> of the same shape may touch in a row or column — three in a line is not allowed.</li>
+          <li>Each row and column must hold an <b>equal number</b> of circles and triangles (three each).</li>
+          <li><b>=</b> between two cells means they are the <b>same</b> shape.</li>
+          <li><b>×</b> between two cells means they are <b>different</b> shapes.</li>
+        </ul>
+        <p class="hint-tip">Tap a cell to cycle: empty → circle → triangle. Right-click to go back. Every puzzle has exactly one solution and is solvable with logic alone.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Win modal -->
+  <div id="winModal" class="modal" hidden>
+    <div class="modal-card win-card">
+      <div class="confetti" aria-hidden="true"></div>
+      <h2>Solved! 🎉</h2>
+      <p id="winStats">Nice work.</p>
+      <div class="win-actions">
+        <button id="winNext" class="primary-btn">Next puzzle →</button>
+        <button id="winClose" class="secondary-btn">Stay here</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
