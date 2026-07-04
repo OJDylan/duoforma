@@ -21,6 +21,9 @@
         <h1>Duoforma</h1>
       </div>
       <div class="top-actions">
+        <button id="statsBtn" class="ghost-btn" title="Daily stats" aria-label="Daily stats">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        </button>
         <button id="themeBtn" class="ghost-btn" title="Toggle dark mode" aria-label="Toggle dark mode">
           <svg class="icon-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           <svg class="icon-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -32,7 +35,8 @@
       </div>
     </header>
 
-    <nav class="difficulty" role="tablist" aria-label="Difficulty">
+    <nav class="difficulty" role="tablist" aria-label="Mode">
+      <button class="diff-tab daily-tab" data-diff="daily" role="tab" title="Today's daily puzzle">★ Daily</button>
       <button class="diff-tab is-active" data-diff="easy" role="tab">Easy</button>
       <button class="diff-tab" data-diff="medium" role="tab">Medium</button>
       <button class="diff-tab" data-diff="hard" role="tab">Hard</button>
@@ -43,6 +47,7 @@
       <button id="prevBtn" class="nav-btn" title="Previous level">‹</button>
       <button id="levelBtn" class="level-chip" title="Pick a level">
         <span id="levelLabel">Level 1</span>
+        <span id="dailyDiff" class="daily-badge" hidden></span>
         <span id="levelDone" class="done-badge" hidden>✓</span>
       </button>
       <button id="nextBtn" class="nav-btn" title="Next level">›</button>
@@ -75,6 +80,7 @@
 
     <footer class="foot">
       <span id="progressText">0 / 500 solved</span>
+      <button id="dailyStreak" class="link-btn" hidden></button>
     </footer>
   </div>
 
@@ -116,7 +122,12 @@
       <div class="confetti" aria-hidden="true"></div>
       <h2>Solved! 🎉</h2>
       <p id="winStats">Nice work.</p>
+      <div id="winShareCard" class="share-card" hidden></div>
       <div class="win-actions">
+        <button id="winShare" class="primary-btn share-btn" hidden>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          <span id="winShareLabel">Share your time</span>
+        </button>
         <button id="winNext" class="primary-btn">Next puzzle →</button>
       </div>
     </div>
@@ -134,6 +145,32 @@
     </div>
   </div>
 
+  <!-- Daily stats modal -->
+  <div id="statsModal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Daily stats</h2>
+        <button id="closeStats" class="ghost-btn">✕</button>
+      </div>
+      <div class="stats-body">
+        <div class="stats-grid">
+          <div class="stat"><span class="stat-num" id="statPlayed">0</span><span class="stat-lbl">Played</span></div>
+          <div class="stat"><span class="stat-num" id="statStreak">0</span><span class="stat-lbl">Streak</span></div>
+          <div class="stat"><span class="stat-num" id="statBest">0</span><span class="stat-lbl">Best streak</span></div>
+          <div class="stat"><span class="stat-num" id="statFastest">–</span><span class="stat-lbl">Fastest</span></div>
+        </div>
+        <h3 class="stats-sub">Recent dailies</h3>
+        <ul id="statsHistory" class="stats-history"></ul>
+        <button id="statsShare" class="secondary-btn share-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          Share your results
+        </button>
+        <p class="stats-tip">Everyone gets the same puzzle each day — share your time and see who's fastest.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="puzzle-gen.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
