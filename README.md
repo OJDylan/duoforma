@@ -20,7 +20,7 @@ Every puzzle has exactly one solution and is solvable with logic alone (no guess
 
 Tap **★ Daily** for a fresh puzzle that is the **same for everyone, every day** — it's generated in your browser from a date seed, so no server or account is needed. The difficulty rotates through the week (easy warm-ups, medium mid-week, harder on Thursdays/Fridays).
 
-- **Archive** — use `‹` / `›` (or `←` / `→`) to step through previous days, or open the stats panel and **tap any day in _Recent dailies_** to jump straight to that puzzle and play it.
+- **Archive** — use `‹` / `›` (or `←` / `→`) to step through previous days, or open the stats panel and **tap any day in _Recent dailies_** to jump straight to that puzzle and play it. Replaying a past day is **practice**: you can still play and share it, but it never counts toward your daily streak — only completing the puzzle on its own live day builds your streak.
 - **Streaks & stats** — the bar-chart icon (top-right) opens your daily stats: games played, current and best streak, fastest time, and a history of recent dailies (each row is tappable to replay that day). Your current streak also shows under the board.
 - **Share your time** — after solving the daily, hit **Share your time** (or **Share your results** in the stats panel). On phones this opens the native share sheet; elsewhere it copies a spoiler-free summary to your clipboard so you can post your time and compare with friends:
 
@@ -62,6 +62,17 @@ or
 npx serve .
 ```
 
+## Daily vs. leveled puzzles
+
+The Daily puzzle is generated at play time from a date seed, so it is **never** one of the puzzles from the `levels.json` bank. `getDailyPuzzle` compares each generated board (its given clues + constraint badges) against every bank puzzle and deterministically re-seeds on the astronomically-rare chance of a match, guaranteeing a Daily is never an exact duplicate of a leveled puzzle.
+
+Verify this across many years of dailies (exits non-zero if any Daily equals a bank puzzle):
+
+```bash
+node verify-daily.js            # ~10 years of dailies
+node verify-daily.js 7300       # ~20 years
+```
+
 ## Regenerating levels
 
 `levels.json` is produced by a self-contained Node script (no dependencies). It generates a random valid solution, derives constraints, minimizes clues while keeping a **unique** solution, and rates difficulty by the hardest deduction technique required.
@@ -79,3 +90,4 @@ node validate-levels.js                 # sanity-check uniqueness & rules (exits
 - `levels.json` — generated puzzle bank (`{ easy, medium, hard }`).
 - `generate-levels.js` — puzzle generator + solver + difficulty rater.
 - `validate-levels.js` — verifies every level is valid and uniquely solvable.
+- `verify-daily.js` — verifies no Daily puzzle is identical to any leveled puzzle.
