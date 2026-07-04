@@ -27,6 +27,7 @@
   --danger: #dc2626;
   --toast-bg: #111827;
   --toast-fg: #ffffff;
+  --accent-soft: #e0e7ff;
 }
 
 :root.dark {
@@ -53,6 +54,7 @@
   --danger: #f87171;
   --toast-bg: #e5e9f0;
   --toast-fg: #0f172a;
+  --accent-soft: #2c2f57;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -295,6 +297,21 @@ body {
   0%, 100% { box-shadow: inset 0 0 0 0 transparent; }
   40% { box-shadow: inset 0 0 0 3px var(--accent); }
 }
+/* hint teaching highlights */
+.cell.hint-reason {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+  z-index: 2;
+}
+.cell.hint-target {
+  background: var(--accent-soft);
+  z-index: 3;
+  animation: hintpulse 1.3s ease-in-out infinite;
+}
+@keyframes hintpulse {
+  0%, 100% { box-shadow: inset 0 0 0 3px var(--accent); }
+  50% { box-shadow: inset 0 0 0 3px var(--accent), 0 0 0 3px var(--accent-soft); }
+}
 
 /* shapes */
 .shape { width: 62%; height: 62%; transition: transform .12s ease; }
@@ -332,6 +349,11 @@ body {
   pointer-events: none;
 }
 .cons.bad { border-color: var(--err); color: var(--err); background: var(--red-soft); }
+.cons.hint-reason-cons {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 
 /* banner */
 .banner {
@@ -354,6 +376,36 @@ body {
 .banner.good { background: #16a34a; color: #fff; }
 .banner.bad { background: #dc2626; color: #fff; }
 @keyframes pop { from { transform: translate(-50%, 6px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+/* ---------- hint explanation panel ---------- */
+.hint-panel {
+  margin-top: 14px;
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+  animation: hint-in .18s ease;
+}
+.hint-panel[hidden] { display: none; }
+.hint-panel-row { display: flex; align-items: center; gap: 10px; }
+.hint-panel-ico { font-size: 18px; line-height: 1; flex: none; }
+.hint-text { margin: 0; flex: 1; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.hint-dismiss {
+  flex: none;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter .15s ease;
+}
+.hint-dismiss:hover { filter: brightness(1.06); }
+@keyframes hint-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ---------- toolbar ---------- */
 .toolbar {

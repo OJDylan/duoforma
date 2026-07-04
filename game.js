@@ -73,6 +73,9 @@
     clearCancel: document.getElementById("clearCancel"),
     clearConfirm: document.getElementById("clearConfirm"),
     hintFill: document.querySelector("#hintBtn .cd-fill"),
+    hintPanel: document.getElementById("hintPanel"),
+    hintText: document.getElementById("hintText"),
+    hintDismiss: document.getElementById("hintDismiss"),
   };
 
   let LEVELS = null;
@@ -93,6 +96,8 @@
     bannerTimer: null,
     errorTimer: null,
     hintCdTimer: null,
+    hintMode: false,
+    hintResume: false,
     validate: localStorage.getItem("duoforma-validate-v1") !== "0",
   };
 
@@ -189,10 +194,18 @@
 
     resetTimer();
     resetHintCooldown();
+    resetHintMode();
     renderConstraints();
     render();
     updateStatus();
     hideBanner();
+  }
+
+  function resetHintMode() {
+    state.hintMode = false;
+    state.hintResume = false;
+    if (el.hintPanel) el.hintPanel.hidden = true;
+    clearHintHighlights();
   }
 
   // ---------- constraints ----------
@@ -249,6 +262,7 @@
 
   // ---------- interaction ----------
   function cycle(i, backward) {
+    if (state.hintMode) { exitHintMode(); return; } // a board tap dismisses the hint
     if (state.locked[i] || state.won) return;
     const cur = state.grid[i];
     let next;
@@ -262,6 +276,7 @@
   }
 
   function undo() {
+    if (state.hintMode) exitHintMode();
     if (!state.history.length || state.won) return;
     const last = state.history.pop();
     state.grid[last.i] = last.prev;
@@ -275,6 +290,7 @@
 
   // Ask before wiping the board; skip the prompt when there's nothing to clear.
   function requestClear() {
+    if (state.hintMode) exitHintMode();
     if (state.won || !hasUserPlaced()) return;
     el.clearModal.hidden = false;
   }
@@ -417,38 +433,169 @@
     el.winModal.hidden = false;
   }
 
-  // ---------- hint ----------
-  function hint() {
-    if (state.won) return;
+  // ---------- hint (teaching mode) ----------
+  function shapeName(v) {
+    return v === CIRCLE ? "circle" : "triangle";
+  }
+
+  // Finds the next single move that a human can deduce, together with the cells
+  // that justify it and a plain-language explanation. Techniques are ordered so
+  // the most instructive/simplest reasoning is offered first. Every candidate is
+  // cross-checked against the known solution so we never teach a wrong move.
+  function findHintDeduction() {
+    const g = state.grid;
     const sol = state.level.solution;
-    let target = -1;
+    const solOk = (i, v) => String(v) === sol[i];
+
+    // 0) a placed shape contradicts the unique solution
     for (let i = 0; i < CELLS; i++) {
       if (state.locked[i]) continue;
-      if (state.grid[i] !== EMPTY && String(state.grid[i]) !== sol[i]) {
-        target = i;
-        break;
+      if (g[i] !== EMPTY && String(g[i]) !== sol[i]) {
+        const v = Number(sol[i]);
+        return {
+          cell: i, value: v, cells: [i], cons: [], type: "mistake",
+          text: `This ${shapeName(g[i])} leads to a dead end — it clashes with what the other cells force. It should be a ${shapeName(v)}.`,
+        };
       }
     }
-    if (target === -1) {
-      const empties = [];
-      for (let i = 0; i < CELLS; i++) if (!state.locked[i] && state.grid[i] === EMPTY) empties.push(i);
-      if (!empties.length) {
-        showBanner("Board is full — check for mistakes.", "bad");
-        return;
-      }
-      target = empties[(Math.random() * empties.length) | 0];
+
+    // 1) constraint badge forces the empty side
+    for (let ci = 0; ci < state.level.constraints.length; ci++) {
+      const [a, b, t] = state.level.constraints[ci];
+      let known = -1, empty = -1;
+      if (g[a] !== EMPTY && g[b] === EMPTY) { known = a; empty = b; }
+      else if (g[b] !== EMPTY && g[a] === EMPTY) { known = b; empty = a; }
+      if (known === -1 || state.locked[empty]) continue;
+      const v = t === 0 ? g[known] : 1 - g[known];
+      if (!solOk(empty, v)) continue;
+      const text = t === 0
+        ? `The = badge links these two cells, so they must be the same shape. Its partner is a ${shapeName(g[known])}, so this cell is a ${shapeName(v)} too.`
+        : `The × badge links these two cells, so they must be different shapes. Its partner is a ${shapeName(g[known])}, so this cell must be a ${shapeName(v)}.`;
+      return { cell: empty, value: v, cells: [a, b], cons: [ci], type: "constraint", text };
     }
-    state.history.push({ i: target, prev: state.grid[target] });
-    state.grid[target] = Number(sol[target]);
+
+    // 2) triple rule — no three identical in a line
+    for (const line of LINES) {
+      for (let k = 0; k <= N - 3; k++) {
+        const p = [line[k], line[k + 1], line[k + 2]];
+        const v = [g[p[0]], g[p[1]], g[p[2]]];
+        // A A _  and  _ A A  (adjacent pair)
+        if (v[0] !== EMPTY && v[0] === v[1] && v[2] === EMPTY && !state.locked[p[2]] && solOk(p[2], 1 - v[0]))
+          return tripAdjacent(p, [p[0], p[1]], p[2], v[0]);
+        if (v[1] !== EMPTY && v[1] === v[2] && v[0] === EMPTY && !state.locked[p[0]] && solOk(p[0], 1 - v[1]))
+          return tripAdjacent(p, [p[1], p[2]], p[0], v[1]);
+        // A _ A  (flanking pair)
+        if (v[0] !== EMPTY && v[0] === v[2] && v[1] === EMPTY && !state.locked[p[1]] && solOk(p[1], 1 - v[0]))
+          return {
+            cell: p[1], value: 1 - v[0], cells: p.slice(), cons: [], type: "triple",
+            text: `Two ${shapeName(v[0])}s sit on either side of this cell. Filling it with a ${shapeName(v[0])} would make three in a line, so it must be a ${shapeName(1 - v[0])}.`,
+          };
+      }
+    }
+
+    // 3) line balance — a row/column already has its full quota of one shape
+    for (let li = 0; li < LINES.length; li++) {
+      const line = LINES[li];
+      const isRow = li < N;
+      let c0 = 0, c1 = 0;
+      for (const i of line) { if (g[i] === CIRCLE) c0++; else if (g[i] === TRIANGLE) c1++; }
+      const full = c0 === HALF ? CIRCLE : c1 === HALF ? TRIANGLE : -1;
+      if (full === -1 || c0 + c1 === line.length) continue;
+      const need = 1 - full;
+      const target = line.find((i) => g[i] === EMPTY && !state.locked[i] && solOk(i, need));
+      if (target == null) continue;
+      const filled = line.filter((i) => g[i] === full);
+      return {
+        cell: target, value: need, cells: filled, cons: [], type: "balance",
+        text: `This ${isRow ? "row" : "column"} already holds all ${HALF} of its ${shapeName(full)}s (the maximum). Every remaining cell must be a ${shapeName(need)}, including this one.`,
+      };
+    }
+
+    // 4) fallback — a cell forced by combined row/column elimination
+    const empties = [];
+    for (let i = 0; i < CELLS; i++) if (!state.locked[i] && g[i] === EMPTY) empties.push(i);
+    if (empties.length) {
+      const i = empties[(Math.random() * empties.length) | 0];
+      const v = Number(sol[i]);
+      return {
+        cell: i, value: v, cells: [i], cons: [], type: "deduce",
+        text: `Balancing this cell's row and column and avoiding three-in-a-line, only a ${shapeName(v)} keeps the puzzle solvable here.`,
+      };
+    }
+    return null;
+
+    function tripAdjacent(all, pair, target, sameVal) {
+      return {
+        cell: target, value: 1 - sameVal, cells: all, cons: [], type: "triple",
+        text: `Two ${shapeName(sameVal)}s are already side by side here. A third in a line isn't allowed, so this next cell must be a ${shapeName(1 - sameVal)}.`,
+      };
+    }
+  }
+
+  function hint() {
+    if (state.won || state.hintMode) return;
+    const d = findHintDeduction();
+    if (!d) {
+      showBanner("Board is full — check for mistakes.", "bad");
+      return;
+    }
+    state.history.push({ i: d.cell, prev: state.grid[d.cell] });
+    state.grid[d.cell] = d.value;
     state.hintsUsed++;
     ensureTimer();
     render();
-    const cell = state.cellEls[target];
-    cell.classList.remove("hintflash");
-    void cell.offsetWidth;
-    cell.classList.add("hintflash");
-    startHintCooldown();
-    checkWin();
+    if (checkWin()) return; // last move solved it — skip teaching panel
+    enterHintMode(d);
+  }
+
+  function enterHintMode(d) {
+    state.hintMode = true;
+    state.hintResume = !!state.timerId; // was the clock running?
+    stopTimer(); // pause while the player reads
+
+    cancelErrorDisplay();
+    clearErrorStyles();
+    clearHintHighlights();
+    d.cells.forEach((i) => state.cellEls[i] && state.cellEls[i].classList.add("hint-reason"));
+    if (state.cellEls[d.cell]) state.cellEls[d.cell].classList.add("hint-target");
+    d.cons.forEach((ci) => state.consEls[ci] && state.consEls[ci].classList.add("hint-reason-cons"));
+
+    el.hintText.textContent = d.text;
+    el.hintPanel.hidden = false;
+    el.hintBtn.disabled = true; // no stacking hints while one is shown
+  }
+
+  function exitHintMode() {
+    if (!state.hintMode) return;
+    state.hintMode = false;
+    clearHintHighlights();
+    el.hintPanel.hidden = true;
+    if (state.hintResume && !state.won) ensureTimer(); // resume the clock
+    state.hintResume = false;
+    refreshErrorDisplay();
+    startHintCooldown(); // begin the cooldown once they're done reading
+  }
+
+  function clearHintHighlights() {
+    for (let i = 0; i < state.cellEls.length; i++) {
+      state.cellEls[i].classList.remove("hint-reason", "hint-target");
+    }
+    state.consEls.forEach((n) => n.classList.remove("hint-reason-cons"));
+  }
+
+  // Disable Hint for HINT_COOLDOWN ms, filling a left-to-right progress bar in
+  // the button. The width transition drives the visual; the timer re-enables.
+  function startHintCooldown() {
+    if (!el.hintFill) return;
+    el.hintBtn.disabled = true;
+    el.hintBtn.classList.add("cooling");
+    el.hintFill.style.transition = "none";
+    el.hintFill.style.width = "0%";
+    void el.hintFill.offsetWidth; // reflow so the next change animates
+    el.hintFill.style.transition = `width ${HINT_COOLDOWN}ms linear`;
+    el.hintFill.style.width = "100%";
+    clearTimeout(state.hintCdTimer);
+    state.hintCdTimer = setTimeout(resetHintCooldown, HINT_COOLDOWN);
   }
 
   // Disable Hint for HINT_COOLDOWN ms, filling a bottom-up progress bar in the
@@ -478,6 +625,7 @@
 
   // ---------- check ----------
   function check() {
+    if (state.hintMode) exitHintMode();
     if (state.won) return;
     const errs = computeErrors();
     // The Check button reveals violations right away, bypassing the delay.
@@ -510,8 +658,14 @@
     }, 250);
   }
   function stopTimer() {
-    if (state.timerId) clearInterval(state.timerId);
-    state.timerId = null;
+    if (state.timerId) {
+      clearInterval(state.timerId);
+      state.timerId = null;
+      if (state.startTime) {
+        state.elapsed = Date.now() - state.startTime;
+        el.timer.textContent = formatTime(state.elapsed);
+      }
+    }
   }
   function resetTimer() {
     stopTimer();
@@ -651,6 +805,8 @@
       clearBoard();
     });
 
+    el.hintDismiss.addEventListener("click", exitHintMode);
+
     el.winNext.addEventListener("click", () => {
       el.winModal.hidden = true;
       if (state.index < LEVELS[state.diff].length - 1) loadLevel(state.index + 1);
@@ -669,6 +825,7 @@
       else if (e.key === "ArrowRight") loadLevel(state.index + 1);
       else if (e.key.toLowerCase() === "z" && (e.metaKey || e.ctrlKey)) undo();
       else if (e.key === "Escape") {
+        if (state.hintMode) exitHintMode();
         el.levelModal.hidden = true;
         el.helpModal.hidden = true;
         el.winModal.hidden = true;
