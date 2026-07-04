@@ -1,27 +1,45 @@
 (() => {
   "use strict";
 
-  const N = 6;
-  const CELLS = N * N;
   const EMPTY = -1;
   const CIRCLE = 0; // blue circle
   const TRIANGLE = 1; // red triangle
-  const DIFFS = ["easy", "medium", "hard"];
+  const DIFFS = ["easy", "medium", "hard", "expert"];
   const STORE_KEY = "duoforma-progress-v1";
-  const ERROR_DELAY = 2000; // ms of inactivity before rule violations are highlighted
+  const THEME_KEY = "duoforma-theme-v1";
+  const ERROR_DELAY = 1000; // ms of inactivity before rule violations are highlighted
+  const HINT_COOLDOWN = 10000; // ms before Hint can be used again
 
-  // lines: 6 rows then 6 cols
-  const LINES = [];
-  for (let r = 0; r < N; r++) {
-    const row = [];
-    for (let c = 0; c < N; c++) row.push(r * N + c);
-    LINES.push(row);
+  // Board dimensions are derived per level (6x6 for easy/medium/hard, 8x8 for
+  // expert). N/CELLS/HALF/LINES are rebuilt whenever the size changes.
+  let N = 6;
+  let CELLS = N * N;
+  let HALF = N / 2; // required count of each shape per row/column
+  let LINES = [];
+  let builtSize = 0; // board size the DOM shell was last built for
+
+  function buildLines(n) {
+    const lines = [];
+    for (let r = 0; r < n; r++) {
+      const row = [];
+      for (let c = 0; c < n; c++) row.push(r * n + c);
+      lines.push(row);
+    }
+    for (let c = 0; c < n; c++) {
+      const col = [];
+      for (let r = 0; r < n; r++) col.push(r * n + c);
+      lines.push(col);
+    }
+    return lines;
   }
-  for (let c = 0; c < N; c++) {
-    const col = [];
-    for (let r = 0; r < N; r++) col.push(r * N + c);
-    LINES.push(col);
+
+  function setBoardSize(n) {
+    N = n;
+    CELLS = n * n;
+    HALF = n / 2;
+    LINES = buildLines(n);
   }
+  setBoardSize(6);
 
   const el = {
     board: document.getElementById("board"),
@@ -44,12 +62,17 @@
     closeModal: document.getElementById("closeModal"),
     helpBtn: document.getElementById("helpBtn"),
     validateBtn: document.getElementById("validateBtn"),
+    themeBtn: document.getElementById("themeBtn"),
     helpModal: document.getElementById("helpModal"),
     closeHelp: document.getElementById("closeHelp"),
     winModal: document.getElementById("winModal"),
     winStats: document.getElementById("winStats"),
     winNext: document.getElementById("winNext"),
     winClose: document.getElementById("winClose"),
+    clearModal: document.getElementById("clearModal"),
+    clearCancel: document.getElementById("clearCancel"),
+    clearConfirm: document.getElementById("clearConfirm"),
+    hintFill: document.querySelector("#hintBtn .cd-fill"),
   };
 
   let LEVELS = null;
@@ -69,16 +92,22 @@
     won: false,
     bannerTimer: null,
     errorTimer: null,
+    hintCdTimer: null,
     validate: localStorage.getItem("duoforma-validate-v1") !== "0",
   };
 
   // ---------- persistence ----------
   function loadProgress() {
+    let p = null;
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) p = JSON.parse(raw);
     } catch (e) {}
-    return { easy: { solved: [], last: 0 }, medium: { solved: [], last: 0 }, hard: { solved: [], last: 0 } };
+    if (!p || typeof p !== "object") p = {};
+    for (const d of DIFFS) {
+      if (!p[d] || !Array.isArray(p[d].solved)) p[d] = { solved: [], last: 0 };
+    }
+    return p;
   }
   let progress = loadProgress();
   function saveProgress() {
@@ -92,6 +121,7 @@
 
   // ---------- init ----------
   async function init() {
+    applyTheme(localStorage.getItem(THEME_KEY) === "dark");
     try {
       const res = await fetch("levels.json");
       LEVELS = await res.json();
@@ -100,7 +130,6 @@
         '<p style="padding:20px;color:#b91c1c">Could not load levels.json. Please serve this folder over HTTP (see README).</p>';
       return;
     }
-    buildBoardShell();
     wireEvents();
     applyValidateUI();
     state.diff = "easy";
@@ -116,7 +145,10 @@
   // ---------- board DOM ----------
   function buildBoardShell() {
     el.board.innerHTML = "";
+    el.board.dataset.n = N;
+    el.board.style.setProperty("--n", N);
     state.cellEls = [];
+    state.consEls = [];
     for (let i = 0; i < CELLS; i++) {
       const c = document.createElement("div");
       c.className = "cell";
@@ -124,12 +156,21 @@
       el.board.appendChild(c);
       state.cellEls.push(c);
     }
+    builtSize = N;
   }
 
   // ---------- load a level ----------
   function loadLevel(index) {
     state.index = clampIndex(index);
     state.level = LEVELS[state.diff][state.index];
+
+    // adapt board to this level's size (6x6 or 8x8), rebuilding the shell if needed
+    const n = Math.round(Math.sqrt(state.level.given.length));
+    if (n !== builtSize) {
+      setBoardSize(n);
+      buildBoardShell();
+    }
+
     state.grid = new Int8Array(CELLS).fill(EMPTY);
     state.locked = new Array(CELLS).fill(false);
     state.history = [];
@@ -147,6 +188,7 @@
     saveProgress();
 
     resetTimer();
+    resetHintCooldown();
     renderConstraints();
     render();
     updateStatus();
@@ -226,6 +268,17 @@
     render();
   }
 
+  function hasUserPlaced() {
+    for (let i = 0; i < CELLS; i++) if (!state.locked[i] && state.grid[i] !== EMPTY) return true;
+    return false;
+  }
+
+  // Ask before wiping the board; skip the prompt when there's nothing to clear.
+  function requestClear() {
+    if (state.won || !hasUserPlaced()) return;
+    el.clearModal.hidden = false;
+  }
+
   function clearBoard() {
     if (state.won) return;
     for (let i = 0; i < CELLS; i++) if (!state.locked[i]) state.grid[i] = EMPTY;
@@ -242,8 +295,8 @@
     for (const line of LINES) {
       const counts = [0, 0];
       for (const i of line) if (state.grid[i] !== EMPTY) counts[state.grid[i]]++;
-      if (counts[0] > 3 || counts[1] > 3) {
-        const over = counts[0] > 3 ? 0 : 1;
+      if (counts[0] > HALF || counts[1] > HALF) {
+        const over = counts[0] > HALF ? 0 : 1;
         for (const i of line) if (state.grid[i] === over) errCells.add(i);
       }
       for (let k = 0; k <= N - 3; k++) {
@@ -308,7 +361,6 @@
     el.validateBtn.classList.toggle("off", !on);
     el.validateBtn.setAttribute("aria-pressed", String(!on));
     el.validateBtn.title = on ? "Hide validation (harder)" : "Show validation";
-    el.checkBtn.disabled = !on; // no on-demand checking while validation is hidden
   }
 
   function toggleValidate() {
@@ -317,6 +369,20 @@
     applyValidateUI();
     refreshErrorDisplay();
     showBanner(state.validate ? "Validation shown" : "Validation hidden — good luck!", state.validate ? "good" : "");
+  }
+
+  // ---------- theme ----------
+  function applyTheme(dark) {
+    document.documentElement.classList.toggle("dark", dark);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", dark ? "#0f172a" : "#f3f4f6");
+    if (el.themeBtn) el.themeBtn.title = dark ? "Switch to light mode" : "Switch to dark mode";
+  }
+
+  function toggleTheme() {
+    const dark = !document.documentElement.classList.contains("dark");
+    applyTheme(dark);
+    localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
   }
 
   function isFull() {
@@ -381,12 +447,38 @@
     cell.classList.remove("hintflash");
     void cell.offsetWidth;
     cell.classList.add("hintflash");
+    startHintCooldown();
     checkWin();
+  }
+
+  // Disable Hint for HINT_COOLDOWN ms, filling a bottom-up progress bar in the
+  // button. The width/height transition drives the visual; the timer re-enables.
+  function startHintCooldown() {
+    if (!el.hintFill) return;
+    el.hintBtn.disabled = true;
+    el.hintBtn.classList.add("cooling");
+    el.hintFill.style.transition = "none";
+    el.hintFill.style.width = "0%";
+    void el.hintFill.offsetWidth; // reflow so the next change animates
+    el.hintFill.style.transition = `width ${HINT_COOLDOWN}ms linear`;
+    el.hintFill.style.width = "100%";
+    clearTimeout(state.hintCdTimer);
+    state.hintCdTimer = setTimeout(resetHintCooldown, HINT_COOLDOWN);
+  }
+
+  function resetHintCooldown() {
+    clearTimeout(state.hintCdTimer);
+    state.hintCdTimer = null;
+    if (!el.hintFill) return;
+    el.hintBtn.disabled = false;
+    el.hintBtn.classList.remove("cooling");
+    el.hintFill.style.transition = "none";
+    el.hintFill.style.width = "0%";
   }
 
   // ---------- check ----------
   function check() {
-    if (state.won || !state.validate) return;
+    if (state.won) return;
     const errs = computeErrors();
     // The Check button reveals violations right away, bypassing the delay.
     cancelErrorDisplay();
@@ -530,7 +622,7 @@
     el.prevBtn.addEventListener("click", () => loadLevel(state.index - 1));
     el.nextBtn.addEventListener("click", () => loadLevel(state.index + 1));
     el.undoBtn.addEventListener("click", undo);
-    el.clearBtn.addEventListener("click", clearBoard);
+    el.clearBtn.addEventListener("click", requestClear);
     el.hintBtn.addEventListener("click", hint);
     el.checkBtn.addEventListener("click", check);
     el.randomBtn.addEventListener("click", () => loadLevel((Math.random() * LEVELS[state.diff].length) | 0));
@@ -549,8 +641,15 @@
     });
 
     el.validateBtn.addEventListener("click", toggleValidate);
+    el.themeBtn.addEventListener("click", toggleTheme);
     el.helpBtn.addEventListener("click", () => (el.helpModal.hidden = false));
     el.closeHelp.addEventListener("click", () => (el.helpModal.hidden = true));
+
+    el.clearCancel.addEventListener("click", () => (el.clearModal.hidden = true));
+    el.clearConfirm.addEventListener("click", () => {
+      el.clearModal.hidden = true;
+      clearBoard();
+    });
 
     el.winNext.addEventListener("click", () => {
       el.winModal.hidden = true;
@@ -558,7 +657,7 @@
     });
     el.winClose.addEventListener("click", () => (el.winModal.hidden = true));
 
-    [el.levelModal, el.helpModal, el.winModal].forEach((m) => {
+    [el.levelModal, el.helpModal, el.winModal, el.clearModal].forEach((m) => {
       m.addEventListener("click", (e) => {
         if (e.target === m) m.hidden = true;
       });
@@ -573,6 +672,7 @@
         el.levelModal.hidden = true;
         el.helpModal.hidden = true;
         el.winModal.hidden = true;
+        el.clearModal.hidden = true;
       }
     });
   }
