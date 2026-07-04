@@ -943,7 +943,19 @@
       };
     }
 
-    // 4) fallback — a cell forced by combined row/column elimination
+    // 4) whole-line reasoning — look ahead across an entire row/column. Even
+    // when no single pair or full quota decides a cell, balancing 3-and-3 while
+    // avoiding any three-in-a-line can leave only one shape that fits. This is
+    // the "nuanced" deduction: e.g. a row C,C,T,_,_,_ forces the LAST cell to a
+    // triangle, because a circle there would need two triangles after it and
+    // that makes three triangles in a row.
+    {
+      const lineHint = findLineForcedCell(solOk);
+      if (lineHint) return lineHint;
+    }
+
+    // 5) fallback — a cell forced only by combining its row AND column (neither
+    // line alone decides it). Rare once the techniques above are exhausted.
     const empties = [];
     for (let i = 0; i < CELLS; i++) if (!state.locked[i] && g[i] === EMPTY) empties.push(i);
     if (empties.length) {
@@ -951,7 +963,7 @@
       const v = Number(sol[i]);
       return {
         cell: i, value: v, cells: [i], cons: [], type: "deduce",
-        text: `Balancing this cell's row and column and avoiding three-in-a-line, only a ${shapeName(v)} keeps the puzzle solvable here.`,
+        text: `This one needs both its row and column together: balancing ${HALF} of each shape and avoiding three-in-a-line, only a ${shapeName(v)} keeps the puzzle solvable here.`,
       };
     }
     return null;
@@ -962,6 +974,98 @@
         text: `Two ${shapeName(sameVal)}s are already side by side here. A third in a line isn't allowed, so this next cell must be a ${shapeName(1 - sameVal)}.`,
       };
     }
+  }
+
+  // Enumerates every legal way to finish a single line (row or column) given the
+  // shapes already on it. A completion is legal when it holds exactly HALF of
+  // each shape, has no three identical in a row, and honours any = / × badge
+  // whose BOTH endpoints lie on this line. Cross-line badges are ignored, which
+  // only makes the check more conservative (it can never claim a false force).
+  function lineCompletions(line) {
+    const base = line.map((i) => state.grid[i]);
+    const empties = [];
+    for (let k = 0; k < base.length; k++) if (base[k] === EMPTY) empties.push(k);
+
+    const posOf = new Map();
+    line.forEach((gi, k) => posOf.set(gi, k));
+    const inlineCons = [];
+    for (const [a, b, t] of state.level.constraints) {
+      if (posOf.has(a) && posOf.has(b)) inlineCons.push([posOf.get(a), posOf.get(b), t]);
+    }
+
+    const results = [];
+    const arr = base.slice();
+    for (let mask = 0; mask < 1 << empties.length; mask++) {
+      for (let e = 0; e < empties.length; e++) arr[empties[e]] = (mask >> e) & 1;
+      if (isLegalLine(arr, inlineCons)) results.push(arr.slice());
+    }
+    return { empties, results };
+  }
+
+  function isLegalLine(arr, cons) {
+    let c0 = 0, c1 = 0;
+    for (const v of arr) v === CIRCLE ? c0++ : c1++;
+    if (c0 !== HALF || c1 !== HALF) return false;
+    for (let k = 0; k <= arr.length - 3; k++) if (arr[k] === arr[k + 1] && arr[k] === arr[k + 2]) return false;
+    for (const [a, b, t] of cons) if ((t === 0 && arr[a] !== arr[b]) || (t === 1 && arr[a] === arr[b])) return false;
+    return true;
+  }
+
+  // Finds a cell that every legal completion of its row or column agrees on, and
+  // explains WHY the alternative shape fails. Returns a hint descriptor or null.
+  function findLineForcedCell(solOk) {
+    for (let li = 0; li < LINES.length; li++) {
+      const line = LINES[li];
+      const isRow = li < N;
+      const { empties, results } = lineCompletions(line);
+      if (results.length === 0) continue;
+      for (const k of empties) {
+        const gi = line[k];
+        if (state.locked[gi]) continue;
+        const v = results[0][k];
+        if (!results.every((r) => r[k] === v)) continue;
+        if (!solOk(gi, v)) continue;
+        const r = explainLineForce(line, k, v, isRow);
+        return { cell: gi, value: v, cells: r.cells, cons: [], type: "line", text: r.text };
+      }
+    }
+    return null;
+  }
+
+  // Builds a plain-language justification for why cell `k` of `line` must be `v`.
+  // Prefers the concrete "balance then three-in-a-line" story when it applies,
+  // otherwise gives an honest whole-line explanation.
+  function explainLineForce(line, k, v, isRow) {
+    const where = isRow ? "row" : "column";
+    const vName = shapeName(v);
+    const bad = 1 - v;
+    const oName = shapeName(bad);
+    const cur = line.map((i) => state.grid[i]);
+    let curBad = 0;
+    for (const x of cur) if (x === bad) curBad++;
+
+    // Balance look-ahead: if the wrong shape here would use up this line's whole
+    // quota of that shape, all remaining cells are forced to the other shape —
+    // and if that produces three-in-a-line, the wrong shape is impossible.
+    if (curBad === HALF - 1) {
+      const sim = cur.slice();
+      sim[k] = bad;
+      for (let j = 0; j < sim.length; j++) if (sim[j] === EMPTY) sim[j] = v;
+      for (let s = 0; s <= sim.length - 3; s++) {
+        if (sim[s] === v && sim[s + 1] === v && sim[s + 2] === v) {
+          return {
+            cells: [line[s], line[s + 1], line[s + 2], line[k]],
+            text: `This ${where} already has ${curBad} ${oName}${curBad === 1 ? "" : "s"} and needs exactly ${HALF}. Making this cell a ${oName} would complete that quota, so every other empty cell in the ${where} would have to be a ${vName} — but that puts three ${vName}s in a row. So this cell must be a ${vName}.`,
+          };
+        }
+      }
+    }
+
+    const known = line.filter((i) => state.grid[i] !== EMPTY);
+    return {
+      cells: known.length ? known : [line[k]],
+      text: `Work along this ${where}: to keep ${HALF} of each shape with no three alike in a line, a ${oName} here leaves no legal way to finish the ${where}. Only a ${vName} fits.`,
+    };
   }
 
   function hint() {
