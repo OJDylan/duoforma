@@ -80,6 +80,7 @@ node verify-daily.js 7300       # ~20 years
 ```bash
 node generate-levels.js 1000            # 1000 puzzles per difficulty (fresh)
 node generate-levels.js 500 --append    # keep existing bank and add 500 more per difficulty
+node generate-expert.js 500 --append    # keep existing expert levels and add 500 more (8×8)
 node validate-levels.js                 # sanity-check uniqueness & rules (exits non-zero on failure)
 ```
 
@@ -87,7 +88,8 @@ node validate-levels.js                 # sanity-check uniqueness & rules (exits
 
 - `index.html` / `styles.css` / `game.js` — the game.
 - `puzzle-gen.js` — deterministic, seeded in-browser puzzle generator that powers the Daily puzzle (a port of `generate-levels.js`; same seed ⇒ same puzzle in every browser).
-- `levels.json` — generated puzzle bank (`{ easy, medium, hard }`).
+- `levels.json` — generated puzzle bank (`{ easy, medium, hard, expert }`).
 - `generate-levels.js` — puzzle generator + solver + difficulty rater.
+- `generate-expert.js` — 8×8 expert puzzle generator.
 - `validate-levels.js` — verifies every level is valid and uniquely solvable.
 - `verify-daily.js` — verifies no Daily puzzle is identical to any leveled puzzle.
