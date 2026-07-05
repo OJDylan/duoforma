@@ -9,7 +9,10 @@
  * Produces "very hard" puzzles (tier >= 2: require look-ahead reasoning) with a
  * unique solution, then writes them to levels.json under the "expert" key.
  *
- * Usage: node generate-expert.js [count]   (default 3)
+ * Usage:
+ *   node generate-expert.js [count]              generate [count] expert levels from scratch
+ *   node generate-expert.js [count] --append     keep existing expert levels and add [count] more
+ * Default count: 500
  */
 
 const fs = require("fs");
@@ -17,7 +20,8 @@ const fs = require("fs");
 const N = 8;
 const CELLS = N * N;
 const HALF = N / 2;
-const COUNT = Number(process.argv[2] || 3);
+const APPEND = process.argv.includes("--append");
+const COUNT = Number(process.argv.filter((a) => a !== "--append")[2] || 500);
 
 const LINES = [];
 for (let r = 0; r < N; r++) { const row = []; for (let c = 0; c < N; c++) row.push(r * N + c); LINES.push(row); }
@@ -238,26 +242,38 @@ function encode(p, id) {
 }
 
 // ---------- main ----------
+const signature = (enc) => enc.given + "|" + enc.constraints.map((c) => c.join(",")).join(";");
 const data = JSON.parse(fs.readFileSync("levels.json", "utf8"));
 const out = [];
 const seen = new Set();
+
+if (APPEND) {
+  out.push(...(data.expert || []));
+  for (const lvl of out) seen.add(signature(lvl));
+  console.log(`Appending ${COUNT} to existing expert (${out.length} already).`);
+}
+
+const target = APPEND ? out.length + COUNT : COUNT;
 let attempts = 0;
 const start = Date.now();
-while (out.length < COUNT) {
+while (out.length < target) {
   attempts++;
   const p = buildPuzzle();
   if (!p) continue;
   if (p.tier < 2) continue; // require look-ahead → "very hard"
   const enc = encode(p, out.length + 1);
-  const sig = enc.given + "|" + enc.constraints.map((c) => c.join(",")).join(";");
+  const sig = signature(enc);
   if (seen.has(sig)) continue;
   seen.add(sig);
   out.push(enc);
-  const givens = enc.given.replace(/\./g, "").length;
-  console.log(`expert ${out.length}/${COUNT}: tier=${p.tier} givens=${givens} constraints=${enc.constraints.length} (attempts ${attempts}, ${((Date.now() - start) / 1000).toFixed(1)}s)`);
-  if (Date.now() - start > 180000) break;
+  if (out.length % 50 === 0 || out.length === target) {
+    const givens = enc.given.replace(/\./g, "").length;
+    console.log(
+      `expert ${out.length}/${target}: tier=${p.tier} givens=${givens} constraints=${enc.constraints.length} (attempts ${attempts}, ${((Date.now() - start) / 1000).toFixed(1)}s)`
+    );
+  }
 }
 if (!out.length) { console.error("Failed to generate any expert puzzle."); process.exit(1); }
 data.expert = out;
 fs.writeFileSync("levels.json", JSON.stringify(data));
-console.log(`Wrote ${out.length} expert puzzle(s) to levels.json.`);
+console.log(`Wrote ${out.length} expert puzzle(s) to levels.json in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
