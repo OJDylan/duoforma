@@ -429,7 +429,7 @@ body {
 /* ---------- toolbar ---------- */
 .toolbar {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-top: 16px;
 }
@@ -454,6 +454,8 @@ body {
 .tool-btn:disabled { opacity: .4; cursor: default; transform: none; }
 .tool-btn .ico { font-size: 17px; }
 .tool-btn > * { position: relative; z-index: 1; }
+.tool-btn.has-checkpoint { border-color: var(--accent); }
+#restoreBtn:not(:disabled) { color: var(--accent); }
 
 /* hint cooldown progress fill (left-to-right) */
 .cd-fill {
