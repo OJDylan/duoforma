@@ -9,6 +9,7 @@
   const THEME_KEY = "duoforma-theme-v1";
   const MODE_KEY = "duoforma-mode-v1"; // last selected mode/difficulty
   const DAILY_KEY = "duoforma-daily-v1"; // per-day results + streaks
+  const CHECKPOINT_KEY = "duoforma-checkpoint-v1";
   const ERROR_DELAY = 1000; // ms of inactivity before rule violations are highlighted
   const HINT_COOLDOWN = 10000; // ms before Hint can be used again
 
@@ -66,6 +67,8 @@
     clearBtn: document.getElementById("clearBtn"),
     hintBtn: document.getElementById("hintBtn"),
     checkBtn: document.getElementById("checkBtn"),
+    checkpointBtn: document.getElementById("checkpointBtn"),
+    restoreBtn: document.getElementById("restoreBtn"),
     randomBtn: document.getElementById("randomBtn"),
     levelModal: document.getElementById("levelModal"),
     levelGrid: document.getElementById("levelGrid"),
@@ -148,6 +151,67 @@
   }
   function solvedSet(diff) {
     return new Set(progress[diff].solved);
+  }
+
+  // ---------- checkpoints ----------
+  function loadCheckpoints() {
+    let c = null;
+    try {
+      const raw = localStorage.getItem(CHECKPOINT_KEY);
+      if (raw) c = JSON.parse(raw);
+    } catch (e) {}
+    if (!c || typeof c !== "object") c = {};
+    return c;
+  }
+  let checkpoints = loadCheckpoints();
+  function saveCheckpoints() {
+    try {
+      localStorage.setItem(CHECKPOINT_KEY, JSON.stringify(checkpoints));
+    } catch (e) {}
+  }
+  function puzzleKey() {
+    if (!state.level) return null;
+    return state.level.id;
+  }
+  function hasCheckpoint() {
+    const key = puzzleKey();
+    return !!(key && checkpoints[key]);
+  }
+  function updateCheckpointUI() {
+    const saved = hasCheckpoint();
+    el.restoreBtn.disabled = !saved || state.won;
+    el.checkpointBtn.classList.toggle("has-checkpoint", saved);
+    el.checkpointBtn.disabled = state.won;
+  }
+  function saveCheckpoint() {
+    if (state.hintMode) exitHintMode();
+    if (state.won || !state.level) return;
+    const key = puzzleKey();
+    if (!key) return;
+    checkpoints[key] = {
+      grid: Array.from(state.grid),
+      elapsed: state.elapsed,
+      hintsUsed: state.hintsUsed,
+    };
+    saveCheckpoints();
+    updateCheckpointUI();
+    showBanner("Checkpoint saved.", "good");
+  }
+  function restoreCheckpoint() {
+    if (state.hintMode) exitHintMode();
+    if (state.won || !state.level) return;
+    const key = puzzleKey();
+    const cp = checkpoints[key];
+    if (!cp) return;
+    state.grid = Int8Array.from(cp.grid);
+    state.history = [];
+    state.hintsUsed = cp.hintsUsed || 0;
+    state.elapsed = cp.elapsed || 0;
+    state.startTime = Date.now() - state.elapsed;
+    el.timer.textContent = formatTime(state.elapsed);
+    if (state.elapsed > 0) ensureTimer();
+    render();
+    showBanner("Restored checkpoint.", "good");
   }
 
   // ---------- daily: persistence ----------
@@ -384,6 +448,7 @@
     render();
     updateStatus();
     hideBanner();
+    updateCheckpointUI();
   }
 
   function loadLevel(index) {
@@ -694,6 +759,7 @@
     el.winShare.onclick = () => shareLevel(shareInfo);
     el.winNext.textContent = "Next puzzle →";
     el.winModal.hidden = false;
+    updateCheckpointUI();
   }
 
   function hintsLabel(n) {
@@ -732,6 +798,7 @@
     // In daily mode "Next" surfaces the social stats view instead of a next level.
     el.winNext.textContent = "View stats →";
     el.winModal.hidden = false;
+    updateCheckpointUI();
   }
 
   // ---------- daily: sharing (no backend — copy/native share) ----------
@@ -1352,6 +1419,8 @@
     el.clearBtn.addEventListener("click", requestClear);
     el.hintBtn.addEventListener("click", hint);
     el.checkBtn.addEventListener("click", check);
+    el.checkpointBtn.addEventListener("click", saveCheckpoint);
+    el.restoreBtn.addEventListener("click", restoreCheckpoint);
     el.randomBtn.addEventListener("click", () => loadLevel((Math.random() * LEVELS[state.diff].length) | 0));
 
     document.querySelectorAll(".diff-tab").forEach((tab) => {
