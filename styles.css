@@ -139,6 +139,30 @@ body {
 
 .top-actions { display: flex; align-items: center; gap: 8px; }
 
+.profile-chip {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  max-width: 120px;
+  height: 34px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  line-height: 1;
+}
+.profile-chip:hover { border-color: var(--accent); color: var(--accent); }
+.profile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* theme toggle icon swap */
 #themeBtn .icon-sun { display: none; }
 :root.dark #themeBtn .icon-moon { display: none; }
@@ -683,10 +707,38 @@ body {
 .secondary-btn.share-btn:disabled { opacity: .5; cursor: default; }
 .stats-tip { color: var(--ink-soft); font-size: 12px; margin: 12px 0 0; text-align: center; }
 
+/* ---------- profile modal ---------- */
+.profile-body { font-size: 14px; color: var(--ink); }
+.profile-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+.profile-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  padding: 11px 12px;
+  border-radius: 12px;
+  outline: none;
+  transition: border-color .15s ease;
+}
+.profile-input:focus { border-color: var(--accent); }
+.profile-tip { color: var(--ink-soft); font-size: 13px; margin: 10px 0 16px; line-height: 1.5; }
+.profile-actions { display: flex; gap: 10px; }
+.profile-actions .secondary-btn,
+.profile-actions .primary-btn { flex: 1; }
+
 /* responsive */
 @media (max-width: 400px) {
   :root { --gap: 4px; }
   .brand h1 { font-size: 22px; }
+  .profile-chip { max-width: 96px; font-size: 11px; padding: 0 10px; }
   .board-wrap { padding: 12px; }
   .tool-btn { font-size: 12px; padding: 10px 4px; }
   .difficulty { padding: 3px; gap: 3px; }
@@ -705,6 +757,7 @@ body {
 @media (hover: none) and (pointer: coarse) {
   .nav-btn { width: 40px; height: 40px; }
   .ghost-btn { width: 38px; height: 38px; }
+  .profile-chip { height: 38px; }
   .tool-btn { padding: 13px 6px; }
   .level-cell { -webkit-touch-callout: none; }
 }

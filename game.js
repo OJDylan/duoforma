@@ -5,11 +5,24 @@
   const CIRCLE = 0; // blue circle
   const TRIANGLE = 1; // red triangle
   const DIFFS = ["easy", "medium", "hard", "expert"];
-  const STORE_KEY = "duoforma-progress-v1";
+  const PROFILE_KEY = "duoforma-profile-v1";
+  const STORE_KEY = "duoforma-progress-v1"; // legacy — migrated into profile
   const THEME_KEY = "duoforma-theme-v1";
   const MODE_KEY = "duoforma-mode-v1"; // last selected mode/difficulty
-  const DAILY_KEY = "duoforma-daily-v1"; // per-day results + streaks
-  const CHECKPOINT_KEY = "duoforma-checkpoint-v1";
+  const DAILY_KEY = "duoforma-daily-v1"; // legacy — migrated into profile
+  const CHECKPOINT_KEY = "duoforma-checkpoint-v1"; // legacy — migrated into profile
+  const PROFILE_NAME_MAX = 24;
+
+  const ADJECTIVES = [
+    "Lazy", "Swift", "Bold", "Calm", "Clever", "Daring", "Eager", "Fuzzy", "Gentle", "Happy",
+    "Jolly", "Keen", "Lucky", "Merry", "Noble", "Peppy", "Quick", "Rusty", "Silly", "Tiny",
+    "Witty", "Zesty", "Brave", "Cosmic", "Dizzy", "Feisty", "Giddy", "Hasty", "Icy", "Jazzy",
+  ];
+  const NOUNS = [
+    "Monkey", "Fox", "Owl", "Bear", "Wolf", "Hawk", "Lynx", "Panda", "Tiger", "Eagle",
+    "Badger", "Falcon", "Gecko", "Heron", "Koala", "Lemur", "Moose", "Otter", "Raven", "Shark",
+    "Sloth", "Viper", "Walrus", "Yak", "Zebra", "Crane", "Dingo", "Finch", "Goose", "Ibex",
+  ];
   const ERROR_DELAY = 1000; // ms of inactivity before rule violations are highlighted
   const HINT_COOLDOWN = 10000; // ms before Hint can be used again
 
@@ -102,6 +115,13 @@
     hintPanel: document.getElementById("hintPanel"),
     hintText: document.getElementById("hintText"),
     hintDismiss: document.getElementById("hintDismiss"),
+    profileBtn: document.getElementById("profileBtn"),
+    profileName: document.getElementById("profileName"),
+    profileModal: document.getElementById("profileModal"),
+    closeProfile: document.getElementById("closeProfile"),
+    profileNameInput: document.getElementById("profileNameInput"),
+    profileRandomize: document.getElementById("profileRandomize"),
+    profileSave: document.getElementById("profileSave"),
   };
 
   let LEVELS = null;
@@ -130,44 +150,133 @@
     validate: localStorage.getItem("duoforma-validate-v1") !== "0",
   };
 
-  // ---------- persistence ----------
-  function loadProgress() {
-    let p = null;
-    try {
-      const raw = localStorage.getItem(STORE_KEY);
-      if (raw) p = JSON.parse(raw);
-    } catch (e) {}
+  // ---------- profile & persistence ----------
+  function todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function generateProfileName() {
+    const adj = ADJECTIVES[(Math.random() * ADJECTIVES.length) | 0];
+    const noun = NOUNS[(Math.random() * NOUNS.length) | 0];
+    return adj + noun;
+  }
+
+  function defaultProgress() {
+    const p = {};
+    for (const d of DIFFS) p[d] = { solved: [], last: 0 };
+    return p;
+  }
+
+  function normalizeProgress(p) {
     if (!p || typeof p !== "object") p = {};
     for (const d of DIFFS) {
       if (!p[d] || !Array.isArray(p[d].solved)) p[d] = { solved: [], last: 0 };
     }
     return p;
   }
-  let progress = loadProgress();
-  function saveProgress() {
+
+  function normalizeDaily(d) {
+    if (!d || typeof d !== "object") d = {};
+    if (!d.results || typeof d.results !== "object") d.results = {};
+    return d;
+  }
+
+  function normalizeCheckpoints(c) {
+    if (!c || typeof c !== "object") c = {};
+    return c;
+  }
+
+  function readLegacyJson(key) {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(progress));
+      const raw = localStorage.getItem(key);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return null;
+  }
+
+  function migrateLegacyProfile() {
+    return {
+      name: generateProfileName(),
+      createdAt: todayStr(),
+      progress: normalizeProgress(readLegacyJson(STORE_KEY)),
+      daily: normalizeDaily(readLegacyJson(DAILY_KEY)),
+      checkpoints: normalizeCheckpoints(readLegacyJson(CHECKPOINT_KEY)),
+    };
+  }
+
+  function loadProfile() {
+    let p = null;
+    try {
+      const raw = localStorage.getItem(PROFILE_KEY);
+      if (raw) p = JSON.parse(raw);
+    } catch (e) {}
+    if (!p || typeof p !== "object" || typeof p.name !== "string" || !p.name.trim()) {
+      p = migrateLegacyProfile();
+      saveProfile(p);
+      return p;
+    }
+    p.name = p.name.trim();
+    p.progress = normalizeProgress(p.progress);
+    p.daily = normalizeDaily(p.daily);
+    p.checkpoints = normalizeCheckpoints(p.checkpoints);
+    if (!p.createdAt) p.createdAt = todayStr();
+    return p;
+  }
+
+  let profile = loadProfile();
+  let progress = profile.progress;
+  let dailyData = profile.daily;
+  let checkpoints = profile.checkpoints;
+
+  function saveProfile(p) {
+    const data = p || profile;
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(data));
     } catch (e) {}
   }
+
+  function saveProgress() {
+    saveProfile();
+  }
+
   function solvedSet(diff) {
     return new Set(progress[diff].solved);
   }
 
-  // ---------- checkpoints ----------
-  function loadCheckpoints() {
-    let c = null;
-    try {
-      const raw = localStorage.getItem(CHECKPOINT_KEY);
-      if (raw) c = JSON.parse(raw);
-    } catch (e) {}
-    if (!c || typeof c !== "object") c = {};
-    return c;
+  function updateProfileUI() {
+    if (!el.profileName) return;
+    el.profileName.textContent = profile.name;
+    if (el.profileBtn) el.profileBtn.title = profile.name;
   }
-  let checkpoints = loadCheckpoints();
+
+  function openProfileModal() {
+    el.profileNameInput.value = profile.name;
+    el.profileModal.hidden = false;
+    el.profileNameInput.focus();
+    el.profileNameInput.select();
+  }
+
+  function sanitizeProfileName(name) {
+    return name.trim().slice(0, PROFILE_NAME_MAX);
+  }
+
+  function saveProfileName(name) {
+    const clean = sanitizeProfileName(name);
+    if (!clean) {
+      showBanner("Name can't be empty.", "err");
+      return;
+    }
+    profile.name = clean;
+    saveProfile();
+    updateProfileUI();
+    el.profileModal.hidden = true;
+    showBanner("Name saved.", "good");
+  }
+
+  // ---------- checkpoints ----------
   function saveCheckpoints() {
-    try {
-      localStorage.setItem(CHECKPOINT_KEY, JSON.stringify(checkpoints));
-    } catch (e) {}
+    saveProfile();
   }
   function puzzleKey() {
     if (!state.level) return null;
@@ -216,21 +325,8 @@
 
   // ---------- daily: persistence ----------
   // dailyData.results maps "YYYY-MM-DD" -> { time: ms, hints: n, tier: t }.
-  function loadDailyData() {
-    let d = null;
-    try {
-      const raw = localStorage.getItem(DAILY_KEY);
-      if (raw) d = JSON.parse(raw);
-    } catch (e) {}
-    if (!d || typeof d !== "object") d = {};
-    if (!d.results || typeof d.results !== "object") d.results = {};
-    return d;
-  }
-  let dailyData = loadDailyData();
   function saveDaily() {
-    try {
-      localStorage.setItem(DAILY_KEY, JSON.stringify(dailyData));
-    } catch (e) {}
+    saveProfile();
   }
 
   // ---------- daily: date helpers ----------
@@ -366,6 +462,7 @@
 
   // ---------- init ----------
   async function init() {
+    updateProfileUI();
     applyTheme(localStorage.getItem(THEME_KEY) === "dark");
     try {
       const res = await fetch("levels.json");
@@ -1427,6 +1524,17 @@
       tab.addEventListener("click", () => selectDiff(tab.dataset.diff));
     });
 
+    el.profileBtn.addEventListener("click", openProfileModal);
+    el.closeProfile.addEventListener("click", () => (el.profileModal.hidden = true));
+    el.profileSave.addEventListener("click", () => saveProfileName(el.profileNameInput.value));
+    el.profileRandomize.addEventListener("click", () => {
+      el.profileNameInput.value = generateProfileName();
+      el.profileNameInput.focus();
+    });
+    el.profileNameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveProfileName(el.profileNameInput.value);
+    });
+
     el.statsBtn.addEventListener("click", openStats);
     el.closeStats.addEventListener("click", () => (el.statsModal.hidden = true));
     el.dailyStreak.addEventListener("click", openStats);
@@ -1480,7 +1588,7 @@
     });
     el.winClose.addEventListener("click", () => (el.winModal.hidden = true));
 
-    [el.levelModal, el.helpModal, el.winModal, el.clearModal, el.statsModal].forEach((m) => {
+    [el.levelModal, el.helpModal, el.winModal, el.clearModal, el.statsModal, el.profileModal].forEach((m) => {
       m.addEventListener("click", (e) => {
         if (e.target === m) m.hidden = true;
       });
@@ -1498,6 +1606,7 @@
         el.winModal.hidden = true;
         el.clearModal.hidden = true;
         el.statsModal.hidden = true;
+        el.profileModal.hidden = true;
       }
     });
   }
