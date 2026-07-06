@@ -264,7 +264,7 @@
   function saveProfileName(name) {
     const clean = sanitizeProfileName(name);
     if (!clean) {
-      showBanner("Name can't be empty.", "err");
+      showBanner("Name can't be empty.", "bad");
       return;
     }
     profile.name = clean;
