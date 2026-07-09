@@ -206,10 +206,6 @@
     state.grid = Int8Array.from(cp.grid);
     state.history = [];
     state.hintsUsed = cp.hintsUsed || 0;
-    state.elapsed = cp.elapsed || 0;
-    state.startTime = Date.now() - state.elapsed;
-    el.timer.textContent = formatTime(state.elapsed);
-    if (state.elapsed > 0) ensureTimer();
     render();
     showBanner("Restored checkpoint.", "good");
   }
