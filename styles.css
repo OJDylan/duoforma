@@ -185,11 +185,11 @@ body {
   color: var(--ink);
   box-shadow: 0 1px 3px rgba(17,24,39,.12);
 }
-/* Daily / Challenge tabs: accent-tinted so they stand out from difficulty tabs */
+/* Daily / Relay tabs: accent-tinted so they stand out from difficulty tabs */
 .daily-tab { color: var(--accent); font-weight: 700; }
 .daily-tab.is-active { color: var(--accent); box-shadow: 0 1px 3px rgba(99,102,241,.28); }
-.challenge-tab { color: var(--warn); font-weight: 700; }
-.challenge-tab.is-active { color: var(--warn); box-shadow: 0 1px 3px rgba(217,119,6,.28); }
+.relay-tab { color: var(--warn); font-weight: 700; }
+.relay-tab.is-active { color: var(--warn); box-shadow: 0 1px 3px rgba(217,119,6,.28); }
 
 /* daily difficulty badge inside the level chip */
 .daily-badge {
@@ -202,7 +202,7 @@ body {
   text-transform: uppercase;
   letter-spacing: .03em;
 }
-.daily-badge.challenge-badge {
+.daily-badge.relay-badge {
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
@@ -729,7 +729,7 @@ body {
   .tool-btn { font-size: 12px; padding: 10px 4px; }
   .difficulty { padding: 3px; gap: 3px; }
   .diff-tab { font-size: 12px; padding: 8px 0; }
-  .challenge-tab, .daily-tab { font-size: 11px; }
+  .relay-tab, .daily-tab { font-size: 11px; }
   .level-chip { font-size: 13px; padding: 8px 10px; }
   .daily-badge { font-size: 10px; padding: 2px 6px; }
 }

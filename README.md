@@ -20,10 +20,10 @@ Every puzzle has exactly one solution and is solvable with logic alone (no guess
 
 Tap **★ Daily** for a fresh puzzle that is the **same for everyone, every day** — it's generated in your browser from a date seed, so no server or account is needed. The difficulty rotates through the week (easy warm-ups, medium mid-week, harder on Thursdays/Fridays).
 
-Tap **⚡ Challenge** for the **Daily Challenge**: four shared puzzles in a row (2 easy → 1 medium → 1 hard) against a single **3:00 countdown**. Clear all four to log a time. Challenge results appear as their own section in the daily leaderboard (separate from the single Daily puzzle).
+Tap **🔀 Relay** for the **Daily Relay**: four shared puzzles in a row (2 easy → 1 medium → 1 hard), each with its own **2:00 countdown**. Clear all four to log a total time. Relay results appear as their own section in the daily leaderboard (separate from the single Daily puzzle).
 
-- **Archive** — use `‹` / `›` (or `←` / `→`) to step through previous days, or open the leaderboard and **tap any day** in _Recent dailies_ or _Recent challenges_ to jump straight to that puzzle/series. Replaying a past day is **practice**: you can still play and share it, but it never counts toward your streak — only completing on the live day builds your streak.
-- **Streaks & leaderboard** — the bar-chart icon (top-right) opens the daily leaderboard: Daily stats (played, streaks, fastest) plus a separate **Challenge** section with the same breakdown. Your current streak also shows under the board.
+- **Archive** — use `‹` / `›` (or `←` / `→`) to step through previous days, or open the leaderboard and **tap any day** in _Recent dailies_ or _Recent relays_ to jump straight to that puzzle/series. Replaying a past day is **practice**: you can still play and share it, but it never counts toward your streak — only completing on the live day builds your streak.
+- **Streaks & leaderboard** — the bar-chart icon (top-right) opens the daily leaderboard: Daily stats (played, streaks, fastest) plus a separate **Relay** section with the same breakdown. Your current streak also shows under the board.
 - **Share your time** — after solving, hit **Share your time** (or the share buttons in the leaderboard). On phones this opens the native share sheet; elsewhere it copies a spoiler-free summary to your clipboard:
 
   ```
@@ -34,14 +34,14 @@ Tap **⚡ Challenge** for the **Daily Challenge**: four shared puzzles in a row 
   ```
 
   ```
-  Duoforma Challenge #550 ⚡
-  ⏱ 2:41 / 3:00 · 4/4 clear · no hints
-  Beat my time → https://your-site/?challenge=2026-07-04
+  Duoforma Relay #550 🔀
+  ⏱ 1:42 total · 2:00/leg · 4/4 clear · no hints
+  Beat my time → https://your-site/?relay=2026-07-04
   ```
 
 Everyone playing the same day gets the identical boards, so times are directly comparable. Results are stored locally in your browser.
 
-Shared links end with `?daily=YYYY-MM-DD` or `?challenge=YYYY-MM-DD`, so opening them drops friends straight onto that mode for that exact day. (Bare `?daily` / `?challenge` open today.)
+Shared links end with `?daily=YYYY-MM-DD` or `?relay=YYYY-MM-DD`, so opening them drops friends straight onto that mode for that exact day. (Bare `?daily` / `?relay` open today.)
 
 **Controls**
 
@@ -72,7 +72,7 @@ npx serve .
 
 ## Daily vs. leveled puzzles
 
-The Daily puzzle and Daily Challenge boards are generated at play time from a date seed, so they are **never** one of the puzzles from the `levels.json` bank. Generation compares each board (its given clues + constraint badges) against every bank puzzle and deterministically re-seeds on the astronomically-rare chance of a match.
+The Daily puzzle and Daily Relay boards are generated at play time from a date seed, so they are **never** one of the puzzles from the `levels.json` bank. Generation compares each board (its given clues + constraint badges) against every bank puzzle and deterministically re-seeds on the astronomically-rare chance of a match.
 
 Verify this across many years of dailies (exits non-zero if any Daily equals a bank puzzle):
 

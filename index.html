@@ -37,7 +37,7 @@
 
     <nav class="difficulty" role="tablist" aria-label="Mode">
       <button class="diff-tab daily-tab" data-diff="daily" role="tab" title="Today's daily puzzle">★ Daily</button>
-      <button class="diff-tab challenge-tab" data-diff="challenge" role="tab" title="Daily challenge — 4 puzzles, 3 minutes">⚡ Challenge</button>
+      <button class="diff-tab relay-tab" data-diff="relay" role="tab" title="Daily relay — 4 puzzles, 2 minutes each">🔀 Relay</button>
       <button class="diff-tab is-active" data-diff="easy" role="tab">Easy</button>
       <button class="diff-tab" data-diff="medium" role="tab">Medium</button>
       <button class="diff-tab" data-diff="hard" role="tab">Hard</button>
@@ -114,7 +114,7 @@
           <li><b>×</b> between two cells means they are <b>different</b> shapes.</li>
         </ul>
         <p class="hint-tip">Tap a cell to cycle: empty → circle → triangle. Right-click to go back. Every puzzle has exactly one solution and is solvable with logic alone.</p>
-        <p class="hint-tip"><b>★ Daily</b> is one shared puzzle each day. <b>⚡ Challenge</b> is a timed run of four puzzles (2 easy, 1 medium, 1 hard) with a 3:00 clock — clear them all to post a time on the challenge leaderboard.</p>
+        <p class="hint-tip"><b>★ Daily</b> is one shared puzzle each day. <b>🔀 Relay</b> is a timed run of four puzzles (2 easy, 1 medium, 1 hard) with a <b>2:00 clock per puzzle</b> — clear them all to post a time on the relay leaderboard.</p>
       </div>
     </div>
   </div>
@@ -171,19 +171,19 @@
           Share daily result
         </button>
 
-        <h3 class="stats-sub stats-section">⚡ Challenge</h3>
-        <p class="stats-blurb">4 puzzles (2 easy · 1 medium · 1 hard) · 3:00 limit</p>
+        <h3 class="stats-sub stats-section">🔀 Relay</h3>
+        <p class="stats-blurb">4 puzzles (2 easy · 1 medium · 1 hard) · 2:00 each</p>
         <div class="stats-grid">
-          <div class="stat"><span class="stat-num" id="chalPlayed">0</span><span class="stat-lbl">Cleared</span></div>
-          <div class="stat"><span class="stat-num" id="chalStreak">0</span><span class="stat-lbl">Streak</span></div>
-          <div class="stat"><span class="stat-num" id="chalBest">0</span><span class="stat-lbl">Best streak</span></div>
-          <div class="stat"><span class="stat-num" id="chalFastest">–</span><span class="stat-lbl">Fastest</span></div>
+          <div class="stat"><span class="stat-num" id="relayPlayed">0</span><span class="stat-lbl">Cleared</span></div>
+          <div class="stat"><span class="stat-num" id="relayStreak">0</span><span class="stat-lbl">Streak</span></div>
+          <div class="stat"><span class="stat-num" id="relayBest">0</span><span class="stat-lbl">Best streak</span></div>
+          <div class="stat"><span class="stat-num" id="relayFastest">–</span><span class="stat-lbl">Fastest</span></div>
         </div>
-        <h3 class="stats-sub">Recent challenges</h3>
-        <ul id="statsChallengeHistory" class="stats-history"></ul>
-        <button id="statsChallengeShare" class="secondary-btn share-btn">
+        <h3 class="stats-sub">Recent relays</h3>
+        <ul id="statsRelayHistory" class="stats-history"></ul>
+        <button id="statsRelayShare" class="secondary-btn share-btn">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-          Share challenge result
+          Share relay result
         </button>
         <p class="stats-tip">Everyone gets the same boards each day — share your time and see who's fastest.</p>
       </div>
