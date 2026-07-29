@@ -439,15 +439,20 @@ const targets = [
 ];
 const out = { easy: [], medium: [], hard: [] };
 const seen = { easy: new Set(), medium: new Set(), hard: new Set() };
+let expert = [];
+
+const prev = fs.existsSync("levels.json")
+  ? JSON.parse(fs.readFileSync("levels.json", "utf8"))
+  : {};
+expert = Array.isArray(prev.expert) ? prev.expert.slice() : [];
 
 if (APPEND) {
-  const prev = JSON.parse(fs.readFileSync("levels.json", "utf8"));
   for (const [name] of targets) {
-    out[name] = prev[name].slice();
-    for (const lvl of prev[name]) seen[name].add(signature(lvl));
+    out[name] = (prev[name] || []).slice();
+    for (const lvl of out[name]) seen[name].add(signature(lvl));
   }
   console.log(
-    `Appending ${PER_DIFFICULTY} to existing (easy=${out.easy.length}, medium=${out.medium.length}, hard=${out.hard.length}).`
+    `Appending ${PER_DIFFICULTY} to existing (easy=${out.easy.length}, medium=${out.medium.length}, hard=${out.hard.length}, expert=${expert.length}).`
   );
 }
 
@@ -473,7 +478,10 @@ for (const [name, tier] of targets) {
   console.log(`Done ${name}: ${out[name].length} puzzles in ${attempts} attempts.`);
 }
 
+if (expert.length) out.expert = expert;
 fs.writeFileSync("levels.json", JSON.stringify(out));
 const kb = (fs.statSync("levels.json").size / 1024).toFixed(1);
 console.log(`\nWrote levels.json (${kb} KB) in ${((Date.now() - start) / 1000).toFixed(1)}s`);
-console.log(`Counts: easy=${out.easy.length}, medium=${out.medium.length}, hard=${out.hard.length}`);
+console.log(
+  `Counts: easy=${out.easy.length}, medium=${out.medium.length}, hard=${out.hard.length}, expert=${expert.length}`
+);
