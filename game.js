@@ -20,6 +20,18 @@
   // Indexed by day of week (0 = Sunday). Values are generator tiers (0/1/2).
   const DAILY_ROTATION = [1, 0, 1, 1, 2, 2, 1];
 
+  // Daily Relay: same 4 boards for everyone (2 easy, 1 medium, 1 hard).
+  // Each puzzle has its own 2-minute countdown; clear all four to log a
+  // total time on the relay section of the daily leaderboard.
+  const RELAY_LIMIT_MS = 2 * 60 * 1000;
+  const RELAY_SEQUENCE = [
+    { tier: 0, key: "e1" },
+    { tier: 0, key: "e2" },
+    { tier: 1, key: "m1" },
+    { tier: 2, key: "h1" },
+  ];
+  const RELAY_LEN = RELAY_SEQUENCE.length;
+
   // Board dimensions are derived per level (6x6 for easy/medium/hard, 8x8 for
   // expert). N/CELLS/HALF/LINES are rebuilt whenever the size changes.
   let N = 6;
@@ -80,6 +92,7 @@
     helpModal: document.getElementById("helpModal"),
     closeHelp: document.getElementById("closeHelp"),
     winModal: document.getElementById("winModal"),
+    winTitle: document.getElementById("winTitle"),
     winStats: document.getElementById("winStats"),
     winNext: document.getElementById("winNext"),
     winClose: document.getElementById("winClose"),
@@ -95,6 +108,12 @@
     statFastest: document.getElementById("statFastest"),
     statsHistory: document.getElementById("statsHistory"),
     statsShare: document.getElementById("statsShare"),
+    relayPlayed: document.getElementById("relayPlayed"),
+    relayStreak: document.getElementById("relayStreak"),
+    relayBest: document.getElementById("relayBest"),
+    relayFastest: document.getElementById("relayFastest"),
+    statsRelayHistory: document.getElementById("statsRelayHistory"),
+    statsRelayShare: document.getElementById("statsRelayShare"),
     clearModal: document.getElementById("clearModal"),
     clearCancel: document.getElementById("clearCancel"),
     clearConfirm: document.getElementById("clearConfirm"),
@@ -111,6 +130,12 @@
     daily: false, // true when the Daily puzzle is loaded
     dailyOffset: 0, // 0 = today, -1 = yesterday, ... (archive)
     dailyMeta: null, // { dateStr, number, tier, label }
+    relay: false, // true when Daily Relay mode is loaded
+    relayOffset: 0, // 0 = today, negative = archive
+    relayIndex: 0, // 0..3 within today's series
+    relayMeta: null, // { dateStr, number }
+    relayFailed: false, // timed out before clearing all four
+    relayTotalMs: 0, // cumulative time used across completed legs + current
     level: null,
     grid: new Int8Array(CELLS).fill(EMPTY),
     locked: new Array(CELLS).fill(false),
@@ -205,13 +230,16 @@
     if (!cp) return;
     state.grid = Int8Array.from(cp.grid);
     state.history = [];
-    state.hintsUsed = cp.hintsUsed || 0;
+    // Relay keeps cumulative hints across legs; never rewind those from a
+    // per-puzzle checkpoint. Each leg has its own countdown.
+    if (!isRelay()) state.hintsUsed = cp.hintsUsed || 0;
     render();
     showBanner("Restored checkpoint.", "good");
   }
 
   // ---------- daily: persistence ----------
   // dailyData.results maps "YYYY-MM-DD" -> { time: ms, hints: n, tier: t }.
+  // dailyData.relay maps "YYYY-MM-DD" -> { time, hints, live } for clears.
   function loadDailyData() {
     let d = null;
     try {
@@ -220,6 +248,7 @@
     } catch (e) {}
     if (!d || typeof d !== "object") d = {};
     if (!d.results || typeof d.results !== "object") d.results = {};
+    if (!d.relay || typeof d.relay !== "object") d.relay = {};
     return d;
   }
   let dailyData = loadDailyData();
@@ -232,6 +261,13 @@
   // ---------- daily: date helpers ----------
   function isDaily() {
     return state.daily;
+  }
+  function isRelay() {
+    return state.relay;
+  }
+  // Daily or Relay — both use date-seeded boards + archive navigation.
+  function isDailyMode() {
+    return state.daily || state.relay;
   }
   function midnight(date) {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -325,31 +361,63 @@
     return level;
   }
 
-  // ---------- daily: streak stats ----------
-  function computeDailyStats() {
-    const results = dailyData.results;
-    const dates = Object.keys(results);
+  // ---------- relay: puzzle generation (deterministic, cached) ----------
+  const relayCache = {};
+  function generateSeededPuzzle(seedBase, tier) {
+    if (!window.DuoformaGen) return null;
+    const bank = getBankSignatures();
+    let p = null;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const seed = seedBase + (attempt ? "-v" + attempt : "");
+      const cand = window.DuoformaGen.generate(seed, tier);
+      if (!cand) break;
+      p = cand;
+      if (!bank.has(puzzleSignature(cand.given, cand.constraints))) break;
+    }
+    return p;
+  }
+
+  function getRelayPuzzles(dateStr) {
+    if (relayCache[dateStr]) return relayCache[dateStr];
+    const levels = [];
+    for (let i = 0; i < RELAY_LEN; i++) {
+      const spec = RELAY_SEQUENCE[i];
+      const p = generateSeededPuzzle(
+        "duoforma-relay-" + dateStr + "-" + spec.key,
+        spec.tier
+      );
+      if (!p) return null;
+      levels.push({
+        id: "relay-" + dateStr + "-" + i,
+        given: p.given,
+        solution: p.solution,
+        constraints: p.constraints,
+        tier: spec.tier,
+        label: DAILY_TIER_LABELS[spec.tier],
+      });
+    }
+    relayCache[dateStr] = levels;
+    return levels;
+  }
+
+  // Streak / fastest helpers shared by Daily and Relay result maps.
+  function computeResultStats(results) {
+    const dates = Object.keys(results || {});
     const played = dates.length;
     let fastest = Infinity;
-    // Streaks only count dailies solved on their own live day. Archived
-    // (previous-day) plays are practice: playable and shareable, but they
-    // never build or restore a streak. Legacy results (no `live` field) are
-    // grandfathered in as live so existing streaks aren't wiped.
     const dayNums = new Set();
     for (const ds of dates) {
       if (results[ds].live !== false) dayNums.add(dayNumber(ds));
       const t = results[ds].time;
       if (typeof t === "number" && t < fastest) fastest = t;
     }
-    // best streak: longest run of consecutive day numbers
     let best = 0;
     for (const n of dayNums) {
-      if (dayNums.has(n - 1)) continue; // not a run start
+      if (dayNums.has(n - 1)) continue;
       let len = 1;
       while (dayNums.has(n + len)) len++;
       if (len > best) best = len;
     }
-    // current streak: consecutive days ending today (or yesterday, grace period)
     const today = dayNumber(dateStrForOffset(0));
     let cur = 0;
     let anchor = dayNums.has(today) ? today : dayNums.has(today - 1) ? today - 1 : null;
@@ -358,6 +426,15 @@
       while (dayNums.has(anchor - cur)) cur++;
     }
     return { played, best, current: cur, fastest: fastest === Infinity ? null : fastest };
+  }
+
+  // ---------- daily: streak stats ----------
+  function computeDailyStats() {
+    return computeResultStats(dailyData.results);
+  }
+
+  function computeRelayStats() {
+    return computeResultStats(dailyData.relay);
   }
 
   // ---------- init ----------
@@ -373,21 +450,29 @@
     }
     wireEvents();
     applyValidateUI();
-    // A shared link (?daily or ?daily=YYYY-MM-DD) always opens on the Daily
-    // tab, deep-linking to the specific day when one is given.
-    const deepLink = window.DuoformaGen ? parseDailyDeepLink() : null;
-    if (deepLink) {
-      localStorage.setItem(MODE_KEY, "daily");
-      loadDaily(deepLink.dateStr ? offsetForDateStr(deepLink.dateStr) : 0);
-      window.addEventListener("resize", positionConstraints);
-      return;
+    // Shared links deep-link into Daily (?daily=…) or Relay (?relay=…).
+    if (window.DuoformaGen) {
+      const relayLink = parseRelayDeepLink();
+      if (relayLink) {
+        localStorage.setItem(MODE_KEY, "relay");
+        loadRelay(relayLink.dateStr ? offsetForDateStr(relayLink.dateStr) : 0);
+        window.addEventListener("resize", positionConstraints);
+        return;
+      }
+      const deepLink = parseDailyDeepLink();
+      if (deepLink) {
+        localStorage.setItem(MODE_KEY, "daily");
+        loadDaily(deepLink.dateStr ? offsetForDateStr(deepLink.dateStr) : 0);
+        window.addEventListener("resize", positionConstraints);
+        return;
+      }
     }
     let mode = localStorage.getItem(MODE_KEY);
     // New visitors land on the Daily puzzle to showcase it; the ★ Daily tab
     // stays available for everyone. Fall back to easy if the generator is
     // unavailable (e.g. opened without puzzle-gen.js).
     if (!mode) mode = window.DuoformaGen ? "daily" : "easy";
-    if (mode === "daily" && !window.DuoformaGen) mode = "easy";
+    if ((mode === "daily" || mode === "relay") && !window.DuoformaGen) mode = "easy";
     selectDiff(mode);
     window.addEventListener("resize", positionConstraints);
   }
@@ -416,7 +501,10 @@
 
   // ---------- load a level ----------
   // Apply the current state.level to the board (shared by bank + daily modes).
-  function applyLevelToBoard() {
+  // opts.keepRelayRun: advancing within a Relay series — keep accumulated
+  // hint count, but always give the next leg a fresh 2:00 countdown.
+  function applyLevelToBoard(opts) {
+    const keepRun = !!(opts && opts.keepRelayRun);
     const n = Math.round(Math.sqrt(state.level.given.length));
     if (n !== builtSize) {
       setBoardSize(n);
@@ -426,8 +514,9 @@
     state.grid = new Int8Array(CELLS).fill(EMPTY);
     state.locked = new Array(CELLS).fill(false);
     state.history = [];
-    state.hintsUsed = 0;
+    if (!keepRun) state.hintsUsed = 0;
     state.won = false;
+    state.relayFailed = false;
 
     const given = state.level.given;
     for (let i = 0; i < CELLS; i++) {
@@ -437,6 +526,7 @@
       }
     }
 
+    // Always reset the per-leg countdown (relay legs each get a fresh 2:00).
     resetTimer();
     resetHintCooldown();
     resetHintMode();
@@ -447,8 +537,18 @@
     updateCheckpointUI();
   }
 
-  function loadLevel(index) {
+  function clearDailyModeFlags() {
     state.daily = false;
+    state.dailyMeta = null;
+    state.relay = false;
+    state.relayMeta = null;
+    state.relayIndex = 0;
+    state.relayFailed = false;
+    state.relayTotalMs = 0;
+  }
+
+  function loadLevel(index) {
+    clearDailyModeFlags();
     state.index = clampIndex(index);
     state.level = LEVELS[state.diff][state.index];
     progress[state.diff].last = state.index;
@@ -467,6 +567,7 @@
       showBanner("Daily puzzle unavailable.", "bad");
       return;
     }
+    clearDailyModeFlags();
     state.daily = true;
     state.dailyOffset = offset;
     state.diff = "daily";
@@ -497,6 +598,56 @@
     loadDaily(offsetForDateStr(dateStr));
   }
 
+  // Load the Daily Relay series for the given archive offset (starts at
+  // puzzle 1/4 with a fresh 2:00 countdown on each leg).
+  function loadRelay(offset) {
+    if (offset > 0) offset = 0;
+    const earliest = 1 - dayNumber(dateStrForOffset(0));
+    if (offset < earliest) offset = earliest;
+    const dateStr = dateStrForOffset(offset);
+    const levels = getRelayPuzzles(dateStr);
+    if (!levels) {
+      showBanner("Relay unavailable.", "bad");
+      return;
+    }
+    clearDailyModeFlags();
+    state.relay = true;
+    state.relayOffset = offset;
+    state.relayIndex = 0;
+    state.relayTotalMs = 0;
+    state.diff = "relay";
+    state.relayMeta = {
+      dateStr,
+      number: dayNumber(dateStr),
+    };
+    state.level = levels[0];
+    applyLevelToBoard();
+  }
+
+  function shiftRelay(delta) {
+    loadRelay(state.relayOffset + delta);
+  }
+
+  function loadRelayDate(dateStr) {
+    if (!window.DuoformaGen) return;
+    localStorage.setItem(MODE_KEY, "relay");
+    loadRelay(offsetForDateStr(dateStr));
+  }
+
+  // Advance to the next board in the series with a fresh 2:00 leg clock.
+  function advanceRelay() {
+    const meta = state.relayMeta;
+    const levels = getRelayPuzzles(meta.dateStr);
+    if (!levels) return;
+    state.relayIndex++;
+    state.level = levels[state.relayIndex];
+    applyLevelToBoard({ keepRelayRun: true });
+    showBanner(
+      `Leg ${state.relayIndex + 1}/${RELAY_LEN} · ${state.level.label} · 2:00`,
+      "good"
+    );
+  }
+
   // Read an optional deep-link that points at the daily tab. Supports
   //   ?daily            -> today's daily
   //   ?daily=YYYY-MM-DD -> a specific (past) daily
@@ -507,6 +658,20 @@
       const val = params.get("daily");
       if (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) return { dateStr: val };
       return { dateStr: null }; // today
+    } catch (e) {
+      return null;
+    }
+  }
+
+  //   ?relay            -> today's relay
+  //   ?relay=YYYY-MM-DD -> a specific (past) relay
+  function parseRelayDeepLink() {
+    try {
+      const params = new URLSearchParams(location.search);
+      if (!params.has("relay")) return null;
+      const val = params.get("relay");
+      if (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) return { dateStr: val };
+      return { dateStr: null };
     } catch (e) {
       return null;
     }
@@ -729,9 +894,11 @@
   // ---------- win ----------
   function onWin() {
     state.won = true;
-    stopTimer();
     cancelErrorDisplay();
     clearErrorStyles();
+    if (isRelay()) return onWinRelay();
+    stopTimer();
+    if (el.winTitle) el.winTitle.textContent = "Solved! 🎉";
     if (isDaily()) return onWinDaily();
     const set = solvedSet(state.diff);
     set.add(state.level.id);
@@ -783,6 +950,7 @@
     let note = "";
     if (!isLiveToday) note = " · practice — streak unaffected";
     else if (prior) note = " · (already logged — replay)";
+    if (el.winTitle) el.winTitle.textContent = "Solved! 🎉";
     el.winStats.textContent =
       `Daily #${meta.number} · ${meta.label} · ${formatTime(result.time)} · ${hintsLabel(result.hints)}` +
       note;
@@ -793,6 +961,70 @@
     el.winShare.onclick = () => shareDaily(meta.dateStr);
     // In daily mode "Next" surfaces the social stats view instead of a next level.
     el.winNext.textContent = "View stats →";
+    el.winModal.hidden = false;
+    updateCheckpointUI();
+  }
+
+  function onWinRelay() {
+    // Bank this leg's time into the cumulative total before advancing / finishing.
+    stopTimer();
+    state.relayTotalMs += state.elapsed;
+
+    // Intermediate clear — next leg gets a fresh 2:00 countdown.
+    if (state.relayIndex < RELAY_LEN - 1) {
+      state.won = false;
+      updateCheckpointUI();
+      advanceRelay();
+      return;
+    }
+
+    const meta = state.relayMeta;
+    const isLiveToday = state.relayOffset === 0;
+    const prior = dailyData.relay[meta.dateStr];
+    if (!prior) {
+      dailyData.relay[meta.dateStr] = {
+        time: state.relayTotalMs,
+        hints: state.hintsUsed,
+        live: isLiveToday,
+      };
+      saveDaily();
+    }
+    updateStatus();
+    const result = dailyData.relay[meta.dateStr];
+    const stats = computeRelayStats();
+    let note = "";
+    if (!isLiveToday) note = " · practice — streak unaffected";
+    else if (prior) note = " · (already logged — replay)";
+    if (el.winTitle) el.winTitle.textContent = "Relay cleared! 🎉";
+    el.winStats.textContent =
+      `Relay #${meta.number} · ${formatTime(result.time)} total · 2:00/leg · ${hintsLabel(result.hints)}` +
+      note;
+    el.winShareCard.textContent = buildRelayShareText(meta.dateStr, result, stats);
+    el.winShareCard.hidden = false;
+    el.winShareLabel.textContent = "Share your time";
+    el.winShare.hidden = false;
+    el.winShare.onclick = () => shareRelay(meta.dateStr);
+    el.winNext.textContent = "View stats →";
+    el.winModal.hidden = false;
+    updateCheckpointUI();
+  }
+
+  function onRelayTimeout() {
+    if (!isRelay() || state.won || state.relayFailed) return;
+    state.relayFailed = true;
+    state.won = true; // lock the board
+    stopTimer();
+    if (state.hintMode) exitHintMode();
+    cancelErrorDisplay();
+    clearErrorStyles();
+    updateStatus();
+    const cleared = state.relayIndex; // legs fully cleared before the fail
+    if (el.winTitle) el.winTitle.textContent = "Time's up";
+    el.winStats.textContent =
+      `Leg ${cleared + 1}/${RELAY_LEN} timed out · cleared ${cleared}/${RELAY_LEN} · try again or practice.`;
+    el.winShareCard.hidden = true;
+    el.winShare.hidden = true;
+    el.winNext.textContent = "Try again →";
     el.winModal.hidden = false;
     updateCheckpointUI();
   }
@@ -818,6 +1050,17 @@
     if (stats && stats.current > 1) lines.push(`🔥 ${stats.current}-day streak`);
     // Deep-link straight to this day's daily so friends play the same board.
     lines.push(`Beat my time → ${siteUrl()}?daily=${dateStr}`);
+    return lines.join("\n");
+  }
+
+  function buildRelayShareText(dateStr, result, stats) {
+    const num = dayNumber(dateStr);
+    const lines = [
+      `Duoforma Relay #${num} 🔀`,
+      `⏱ ${formatTime(result.time)} total · 2:00/leg · 4/4 clear · ${hintsLabel(result.hints)}`,
+    ];
+    if (stats && stats.current > 1) lines.push(`🔥 ${stats.current}-day streak`);
+    lines.push(`Beat my time → ${siteUrl()}?relay=${dateStr}`);
     return lines.join("\n");
   }
 
@@ -865,6 +1108,25 @@
     showBanner(ok ? "Result copied — paste to share!" : "Couldn't copy result.", ok ? "good" : "bad");
   }
 
+  async function shareRelay(dateStr) {
+    const result = dailyData.relay[dateStr];
+    if (!result) {
+      showBanner("Clear today's relay first!", "bad");
+      return;
+    }
+    const text = buildRelayShareText(dateStr, result, computeRelayStats());
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Duoforma Relay", text });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+      }
+    }
+    const ok = await copyText(text);
+    showBanner(ok ? "Result copied — paste to share!" : "Couldn't copy result.", ok ? "good" : "bad");
+  }
+
   async function copyText(text) {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -888,42 +1150,62 @@
     }
   }
 
-  // ---------- daily: stats modal ----------
+  // ---------- daily: stats / leaderboard modal ----------
+  function renderHistoryList(target, results, mode) {
+    let html = "";
+    for (let off = 0; off > -14; off--) {
+      const ds = dateStrForOffset(off);
+      if (dayNumber(ds) < 1) break;
+      const res = results[ds];
+      const num = dayNumber(ds);
+      const mid =
+        mode === "relay"
+          ? `<span class="hist-diff">2E · 1M · 1H</span>`
+          : `<span class="hist-diff">${DAILY_TIER_LABELS[dailyTierFor(ds)]}</span>`;
+      const right = res
+        ? `<span class="hist-time">${formatTime(res.time)}</span>`
+        : `<span class="hist-open">play ›</span>`;
+      html +=
+        `<li class="hist-row play${res ? " done" : ""}" data-date="${ds}" data-mode="${mode}" role="button" tabindex="0" title="Play this day">` +
+        `<span class="hist-day">#${num} · ${weekdayLabel(ds)}</span>` +
+        mid +
+        right +
+        `</li>`;
+    }
+    target.innerHTML = html;
+  }
+
+  function latestResultDate(results) {
+    for (let off = 0; off > -400; off--) {
+      const ds = dateStrForOffset(off);
+      if (dayNumber(ds) < 1) break;
+      if (results[ds]) return ds;
+    }
+    return null;
+  }
+
   function openStats() {
     const stats = computeDailyStats();
     el.statPlayed.textContent = stats.played;
     el.statStreak.textContent = stats.current;
     el.statBest.textContent = stats.best;
     el.statFastest.textContent = stats.fastest == null ? "–" : formatTime(stats.fastest);
+    renderHistoryList(el.statsHistory, dailyData.results, "daily");
 
-    let html = "";
-    for (let off = 0; off > -14; off--) {
-      const ds = dateStrForOffset(off);
-      if (dayNumber(ds) < 1) break;
-      const res = dailyData.results[ds];
-      const tier = dailyTierFor(ds);
-      const num = dayNumber(ds);
-      const right = res
-        ? `<span class="hist-time">${formatTime(res.time)}</span>`
-        : `<span class="hist-open">play ›</span>`;
-      html +=
-        `<li class="hist-row play${res ? " done" : ""}" data-date="${ds}" role="button" tabindex="0" title="Play this day">` +
-        `<span class="hist-day">#${num} · ${weekdayLabel(ds)}</span>` +
-        `<span class="hist-diff">${DAILY_TIER_LABELS[tier]}</span>` +
-        right +
-        `</li>`;
-    }
-    el.statsHistory.innerHTML = html;
-
-    // Share the most recent completed daily (today if done, else latest).
-    let shareDate = null;
-    for (let off = 0; off > -400; off--) {
-      const ds = dateStrForOffset(off);
-      if (dayNumber(ds) < 1) break;
-      if (dailyData.results[ds]) { shareDate = ds; break; }
-    }
+    const shareDate = latestResultDate(dailyData.results);
     el.statsShare.disabled = !shareDate;
     el.statsShare.onclick = () => shareDate && shareDaily(shareDate);
+
+    const relayStats = computeRelayStats();
+    el.relayPlayed.textContent = relayStats.played;
+    el.relayStreak.textContent = relayStats.current;
+    el.relayBest.textContent = relayStats.best;
+    el.relayFastest.textContent = relayStats.fastest == null ? "–" : formatTime(relayStats.fastest);
+    renderHistoryList(el.statsRelayHistory, dailyData.relay, "relay");
+
+    const relayShareDate = latestResultDate(dailyData.relay);
+    el.statsRelayShare.disabled = !relayShareDate;
+    el.statsRelayShare.onclick = () => relayShareDate && shareRelay(relayShareDate);
 
     el.statsModal.hidden = false;
   }
@@ -1248,12 +1530,30 @@
   }
 
   // ---------- timer ----------
+  function paintTimer() {
+    if (isRelay()) {
+      const remaining = Math.max(0, RELAY_LIMIT_MS - state.elapsed);
+      el.timer.textContent = formatTime(remaining);
+      el.timer.classList.add("countdown");
+      el.timer.classList.toggle("urgent", remaining <= 30000 && remaining > 0);
+    } else {
+      el.timer.textContent = formatTime(state.elapsed);
+      el.timer.classList.remove("countdown", "urgent");
+    }
+  }
+
   function ensureTimer() {
     if (state.timerId) return;
     state.startTime = Date.now() - state.elapsed;
     state.timerId = setInterval(() => {
       state.elapsed = Date.now() - state.startTime;
-      el.timer.textContent = formatTime(state.elapsed);
+      if (isRelay() && state.elapsed >= RELAY_LIMIT_MS) {
+        state.elapsed = RELAY_LIMIT_MS;
+        paintTimer();
+        onRelayTimeout();
+        return;
+      }
+      paintTimer();
     }, 250);
   }
   function stopTimer() {
@@ -1262,7 +1562,8 @@
       state.timerId = null;
       if (state.startTime) {
         state.elapsed = Date.now() - state.startTime;
-        el.timer.textContent = formatTime(state.elapsed);
+        if (isRelay()) state.elapsed = Math.min(state.elapsed, RELAY_LIMIT_MS);
+        paintTimer();
       }
     }
   }
@@ -1270,7 +1571,7 @@
     stopTimer();
     state.elapsed = 0;
     state.startTime = 0;
-    el.timer.textContent = "0:00";
+    paintTimer();
   }
   function formatTime(ms) {
     const s = Math.floor(ms / 1000);
@@ -1287,8 +1588,10 @@
 
   function updateStatus() {
     if (isDaily()) return updateStatusDaily();
+    if (isRelay()) return updateStatusRelay();
     el.levelLabel.textContent = "Level " + (state.index + 1);
     el.dailyDiff.hidden = true;
+    el.dailyDiff.classList.remove("relay-badge");
     el.dailyStreak.hidden = true;
     el.randomBtn.style.display = ""; // .nav-btn display beats the [hidden] attr
     el.levelBtn.title = "Pick a level";
@@ -1304,9 +1607,10 @@
     const meta = state.dailyMeta;
     el.levelLabel.textContent = meta.dateStr === dateStrForOffset(0) ? "Today" : weekdayLabel(meta.dateStr);
     el.dailyDiff.textContent = meta.label;
+    el.dailyDiff.classList.remove("relay-badge");
     el.dailyDiff.hidden = false;
     el.randomBtn.style.display = "none";
-    el.levelBtn.title = "Daily stats";
+    el.levelBtn.title = "Daily leaderboard";
     const done = !!dailyData.results[meta.dateStr];
     el.levelDone.hidden = !done;
     el.prevBtn.disabled = meta.number <= 1; // can't go before day #1
@@ -1322,13 +1626,43 @@
     setActiveTab("daily");
   }
 
+  function updateStatusRelay() {
+    const meta = state.relayMeta;
+    const step = state.relayIndex + 1;
+    const label = state.level && state.level.label ? state.level.label : "";
+    el.levelLabel.textContent =
+      meta.dateStr === dateStrForOffset(0) ? "Today" : weekdayLabel(meta.dateStr);
+    el.dailyDiff.textContent = `${step}/${RELAY_LEN} ${label}`;
+    el.dailyDiff.classList.add("relay-badge");
+    el.dailyDiff.hidden = false;
+    el.randomBtn.style.display = "none";
+    el.levelBtn.title = "Daily leaderboard";
+    const done = !!dailyData.relay[meta.dateStr];
+    el.levelDone.hidden = !done;
+    el.prevBtn.disabled = meta.number <= 1;
+    el.nextBtn.disabled = state.relayOffset >= 0;
+    el.progressText.textContent = `Relay #${meta.number} · 2:00/leg`;
+    const stats = computeRelayStats();
+    if (stats.current > 0) {
+      el.dailyStreak.textContent = `🔀 ${stats.current}-day streak`;
+      el.dailyStreak.hidden = false;
+    } else {
+      el.dailyStreak.hidden = true;
+    }
+    setActiveTab("relay");
+  }
+
   function selectDiff(diff) {
     localStorage.setItem(MODE_KEY, diff);
     if (diff === "daily") {
       loadDaily(0);
       return;
     }
-    state.daily = false;
+    if (diff === "relay") {
+      loadRelay(0);
+      return;
+    }
+    clearDailyModeFlags();
     state.diff = diff;
     loadLevel(clampIndex(progress[diff].last || 0));
   }
@@ -1409,8 +1743,16 @@
       if (!("ontouchstart" in window)) cycle(Number(cell.dataset.i), true);
     });
 
-    el.prevBtn.addEventListener("click", () => (isDaily() ? shiftDaily(-1) : loadLevel(state.index - 1)));
-    el.nextBtn.addEventListener("click", () => (isDaily() ? shiftDaily(1) : loadLevel(state.index + 1)));
+    el.prevBtn.addEventListener("click", () => {
+      if (isDaily()) shiftDaily(-1);
+      else if (isRelay()) shiftRelay(-1);
+      else loadLevel(state.index - 1);
+    });
+    el.nextBtn.addEventListener("click", () => {
+      if (isDaily()) shiftDaily(1);
+      else if (isRelay()) shiftRelay(1);
+      else loadLevel(state.index + 1);
+    });
     el.undoBtn.addEventListener("click", undo);
     el.clearBtn.addEventListener("click", requestClear);
     el.hintBtn.addEventListener("click", hint);
@@ -1427,24 +1769,27 @@
     el.closeStats.addEventListener("click", () => (el.statsModal.hidden = true));
     el.dailyStreak.addEventListener("click", openStats);
 
-    // Tap a row in "Recent dailies" to replay that day's puzzle.
+    // Tap a row in recent Daily / Relay history to replay that day.
     const playHistoryRow = (row) => {
       if (!row || !row.dataset.date) return;
       el.statsModal.hidden = true;
-      loadDailyDate(row.dataset.date);
+      if (row.dataset.mode === "relay") loadRelayDate(row.dataset.date);
+      else loadDailyDate(row.dataset.date);
     };
-    el.statsHistory.addEventListener("click", (e) =>
-      playHistoryRow(e.target.closest(".hist-row"))
-    );
-    el.statsHistory.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      const row = e.target.closest(".hist-row");
-      if (!row) return;
-      e.preventDefault();
-      playHistoryRow(row);
-    });
+    const wireHistoryList = (list) => {
+      list.addEventListener("click", (e) => playHistoryRow(e.target.closest(".hist-row")));
+      list.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const row = e.target.closest(".hist-row");
+        if (!row) return;
+        e.preventDefault();
+        playHistoryRow(row);
+      });
+    };
+    wireHistoryList(el.statsHistory);
+    wireHistoryList(el.statsRelayHistory);
 
-    el.levelBtn.addEventListener("click", () => (isDaily() ? openStats() : openLevelModal()));
+    el.levelBtn.addEventListener("click", () => (isDailyMode() ? openStats() : openLevelModal()));
     el.closeModal.addEventListener("click", () => (el.levelModal.hidden = true));
     el.levelGrid.addEventListener("click", (e) => {
       const b = e.target.closest(".level-cell");
@@ -1468,7 +1813,10 @@
 
     el.winNext.addEventListener("click", () => {
       el.winModal.hidden = true;
-      if (isDaily()) {
+      if (isRelay()) {
+        if (state.relayFailed) loadRelay(state.relayOffset);
+        else openStats();
+      } else if (isDaily()) {
         openStats();
       } else if (state.index < LEVELS[state.diff].length - 1) {
         loadLevel(state.index + 1);
@@ -1484,9 +1832,15 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.target.tagName === "INPUT") return;
-      if (e.key === "ArrowLeft") isDaily() ? shiftDaily(-1) : loadLevel(state.index - 1);
-      else if (e.key === "ArrowRight") isDaily() ? shiftDaily(1) : loadLevel(state.index + 1);
-      else if (e.key.toLowerCase() === "z" && (e.metaKey || e.ctrlKey)) undo();
+      if (e.key === "ArrowLeft") {
+        if (isDaily()) shiftDaily(-1);
+        else if (isRelay()) shiftRelay(-1);
+        else loadLevel(state.index - 1);
+      } else if (e.key === "ArrowRight") {
+        if (isDaily()) shiftDaily(1);
+        else if (isRelay()) shiftRelay(1);
+        else loadLevel(state.index + 1);
+      } else if (e.key.toLowerCase() === "z" && (e.metaKey || e.ctrlKey)) undo();
       else if (e.key === "Escape") {
         if (state.hintMode) exitHintMode();
         el.levelModal.hidden = true;

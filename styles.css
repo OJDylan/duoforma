@@ -12,6 +12,7 @@
   --red-soft: #fee2e2;
   --accent: #6366f1;
   --good: #16a34a;
+  --warn: #d97706;
   --err: #dc2626;
   --gap: 5px;
   --radius: 16px;
@@ -44,6 +45,7 @@
   --red-soft: #3a1e1e;
   --accent: #818cf8;
   --good: #34d399;
+  --warn: #fbbf24;
   --err: #f87171;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.35);
   --cell-bg: #24314a;
@@ -183,9 +185,11 @@ body {
   color: var(--ink);
   box-shadow: 0 1px 3px rgba(17,24,39,.12);
 }
-/* Daily tab: accent-tinted so it stands out from the difficulty tabs */
+/* Daily / Relay tabs: accent-tinted so they stand out from difficulty tabs */
 .daily-tab { color: var(--accent); font-weight: 700; }
 .daily-tab.is-active { color: var(--accent); box-shadow: 0 1px 3px rgba(99,102,241,.28); }
+.relay-tab { color: var(--warn); font-weight: 700; }
+.relay-tab.is-active { color: var(--warn); box-shadow: 0 1px 3px rgba(217,119,6,.28); }
 
 /* daily difficulty badge inside the level chip */
 .daily-badge {
@@ -197,6 +201,10 @@ body {
   padding: 2px 8px;
   text-transform: uppercase;
   letter-spacing: .03em;
+}
+.daily-badge.relay-badge {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
 }
 .daily-badge[hidden] { display: none; }
 
@@ -254,6 +262,15 @@ body {
   border-radius: 10px;
   min-width: 62px;
   text-align: center;
+}
+.timer.countdown { color: var(--ink); }
+.timer.urgent {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 40%, var(--line));
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+@keyframes timer-pulse {
+  50% { opacity: .72; }
 }
 
 /* ---------- board ---------- */
@@ -659,6 +676,27 @@ body {
   text-transform: uppercase;
   letter-spacing: .04em;
 }
+.stats-sub-first { margin-top: 0; }
+.stats-section {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 15px;
+}
+.stats-sub-first.stats-sub {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 15px;
+  color: var(--ink);
+}
+.stats-blurb {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
 .stats-history { list-style: none; margin: 0 0 14px; padding: 0; }
 .hist-row {
   display: grid;
@@ -691,6 +729,7 @@ body {
   .tool-btn { font-size: 12px; padding: 10px 4px; }
   .difficulty { padding: 3px; gap: 3px; }
   .diff-tab { font-size: 12px; padding: 8px 0; }
+  .relay-tab, .daily-tab { font-size: 11px; }
   .level-chip { font-size: 13px; padding: 8px 10px; }
   .daily-badge { font-size: 10px; padding: 2px 6px; }
 }
