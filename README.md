@@ -20,9 +20,11 @@ Every puzzle has exactly one solution and is solvable with logic alone (no guess
 
 Tap **★ Daily** for a fresh puzzle that is the **same for everyone, every day** — it's generated in your browser from a date seed, so no server or account is needed. The difficulty rotates through the week (easy warm-ups, medium mid-week, harder on Thursdays/Fridays).
 
-- **Archive** — use `‹` / `›` (or `←` / `→`) to step through previous days, or open the stats panel and **tap any day in _Recent dailies_** to jump straight to that puzzle and play it. Replaying a past day is **practice**: you can still play and share it, but it never counts toward your daily streak — only completing the puzzle on its own live day builds your streak.
-- **Streaks & stats** — the bar-chart icon (top-right) opens your daily stats: games played, current and best streak, fastest time, and a history of recent dailies (each row is tappable to replay that day). Your current streak also shows under the board.
-- **Share your time** — after solving the daily, hit **Share your time** (or **Share your results** in the stats panel). On phones this opens the native share sheet; elsewhere it copies a spoiler-free summary to your clipboard so you can post your time and compare with friends:
+Tap **⚡ Challenge** for the **Daily Challenge**: four shared puzzles in a row (2 easy → 1 medium → 1 hard) against a single **3:00 countdown**. Clear all four to log a time. Challenge results appear as their own section in the daily leaderboard (separate from the single Daily puzzle).
+
+- **Archive** — use `‹` / `›` (or `←` / `→`) to step through previous days, or open the leaderboard and **tap any day** in _Recent dailies_ or _Recent challenges_ to jump straight to that puzzle/series. Replaying a past day is **practice**: you can still play and share it, but it never counts toward your streak — only completing on the live day builds your streak.
+- **Streaks & leaderboard** — the bar-chart icon (top-right) opens the daily leaderboard: Daily stats (played, streaks, fastest) plus a separate **Challenge** section with the same breakdown. Your current streak also shows under the board.
+- **Share your time** — after solving, hit **Share your time** (or the share buttons in the leaderboard). On phones this opens the native share sheet; elsewhere it copies a spoiler-free summary to your clipboard:
 
   ```
   Duoforma Daily #550 ★ Medium
@@ -31,9 +33,15 @@ Tap **★ Daily** for a fresh puzzle that is the **same for everyone, every day*
   Beat my time → https://your-site/?daily=2026-07-04
   ```
 
-Everyone playing the same day gets the identical board, so times are directly comparable. Daily results are stored locally in your browser.
+  ```
+  Duoforma Challenge #550 ⚡
+  ⏱ 2:41 / 3:00 · 4/4 clear · no hints
+  Beat my time → https://your-site/?challenge=2026-07-04
+  ```
 
-The shared link ends with `?daily=YYYY-MM-DD`, so opening it drops your friends straight onto the **★ Daily** tab for that exact day's puzzle. (A bare `?daily` opens today's daily.)
+Everyone playing the same day gets the identical boards, so times are directly comparable. Results are stored locally in your browser.
+
+Shared links end with `?daily=YYYY-MM-DD` or `?challenge=YYYY-MM-DD`, so opening them drops friends straight onto that mode for that exact day. (Bare `?daily` / `?challenge` open today.)
 
 **Controls**
 
@@ -64,7 +72,7 @@ npx serve .
 
 ## Daily vs. leveled puzzles
 
-The Daily puzzle is generated at play time from a date seed, so it is **never** one of the puzzles from the `levels.json` bank. `getDailyPuzzle` compares each generated board (its given clues + constraint badges) against every bank puzzle and deterministically re-seeds on the astronomically-rare chance of a match, guaranteeing a Daily is never an exact duplicate of a leveled puzzle.
+The Daily puzzle and Daily Challenge boards are generated at play time from a date seed, so they are **never** one of the puzzles from the `levels.json` bank. Generation compares each board (its given clues + constraint badges) against every bank puzzle and deterministically re-seeds on the astronomically-rare chance of a match.
 
 Verify this across many years of dailies (exits non-zero if any Daily equals a bank puzzle):
 

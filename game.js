@@ -20,6 +20,18 @@
   // Indexed by day of week (0 = Sunday). Values are generator tiers (0/1/2).
   const DAILY_ROTATION = [1, 0, 1, 1, 2, 2, 1];
 
+  // Daily Challenge: same 4 boards for everyone (2 easy, 1 medium, 1 hard),
+  // shared 3-minute countdown. Completing all four logs a time on the
+  // challenge section of the daily leaderboard.
+  const CHALLENGE_LIMIT_MS = 3 * 60 * 1000;
+  const CHALLENGE_SEQUENCE = [
+    { tier: 0, key: "e1" },
+    { tier: 0, key: "e2" },
+    { tier: 1, key: "m1" },
+    { tier: 2, key: "h1" },
+  ];
+  const CHALLENGE_LEN = CHALLENGE_SEQUENCE.length;
+
   // Board dimensions are derived per level (6x6 for easy/medium/hard, 8x8 for
   // expert). N/CELLS/HALF/LINES are rebuilt whenever the size changes.
   let N = 6;
@@ -80,6 +92,7 @@
     helpModal: document.getElementById("helpModal"),
     closeHelp: document.getElementById("closeHelp"),
     winModal: document.getElementById("winModal"),
+    winTitle: document.getElementById("winTitle"),
     winStats: document.getElementById("winStats"),
     winNext: document.getElementById("winNext"),
     winClose: document.getElementById("winClose"),
@@ -95,6 +108,12 @@
     statFastest: document.getElementById("statFastest"),
     statsHistory: document.getElementById("statsHistory"),
     statsShare: document.getElementById("statsShare"),
+    chalPlayed: document.getElementById("chalPlayed"),
+    chalStreak: document.getElementById("chalStreak"),
+    chalBest: document.getElementById("chalBest"),
+    chalFastest: document.getElementById("chalFastest"),
+    statsChallengeHistory: document.getElementById("statsChallengeHistory"),
+    statsChallengeShare: document.getElementById("statsChallengeShare"),
     clearModal: document.getElementById("clearModal"),
     clearCancel: document.getElementById("clearCancel"),
     clearConfirm: document.getElementById("clearConfirm"),
@@ -111,6 +130,11 @@
     daily: false, // true when the Daily puzzle is loaded
     dailyOffset: 0, // 0 = today, -1 = yesterday, ... (archive)
     dailyMeta: null, // { dateStr, number, tier, label }
+    challenge: false, // true when Daily Challenge mode is loaded
+    challengeOffset: 0, // 0 = today, negative = archive
+    challengeIndex: 0, // 0..3 within today's series
+    challengeMeta: null, // { dateStr, number }
+    challengeFailed: false, // timed out before clearing all four
     level: null,
     grid: new Int8Array(CELLS).fill(EMPTY),
     locked: new Array(CELLS).fill(false),
@@ -205,13 +229,16 @@
     if (!cp) return;
     state.grid = Int8Array.from(cp.grid);
     state.history = [];
-    state.hintsUsed = cp.hintsUsed || 0;
+    // Challenge uses one shared countdown + cumulative hints across all four
+    // boards — never rewind those from a per-puzzle checkpoint.
+    if (!isChallenge()) state.hintsUsed = cp.hintsUsed || 0;
     render();
     showBanner("Restored checkpoint.", "good");
   }
 
   // ---------- daily: persistence ----------
   // dailyData.results maps "YYYY-MM-DD" -> { time: ms, hints: n, tier: t }.
+  // dailyData.challenge maps "YYYY-MM-DD" -> { time, hints, live } for clears.
   function loadDailyData() {
     let d = null;
     try {
@@ -220,6 +247,7 @@
     } catch (e) {}
     if (!d || typeof d !== "object") d = {};
     if (!d.results || typeof d.results !== "object") d.results = {};
+    if (!d.challenge || typeof d.challenge !== "object") d.challenge = {};
     return d;
   }
   let dailyData = loadDailyData();
@@ -232,6 +260,13 @@
   // ---------- daily: date helpers ----------
   function isDaily() {
     return state.daily;
+  }
+  function isChallenge() {
+    return state.challenge;
+  }
+  // Daily or Challenge — both use date-seeded boards + archive navigation.
+  function isDailyMode() {
+    return state.daily || state.challenge;
   }
   function midnight(date) {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -325,31 +360,63 @@
     return level;
   }
 
-  // ---------- daily: streak stats ----------
-  function computeDailyStats() {
-    const results = dailyData.results;
-    const dates = Object.keys(results);
+  // ---------- challenge: puzzle generation (deterministic, cached) ----------
+  const challengeCache = {};
+  function generateSeededPuzzle(seedBase, tier) {
+    if (!window.DuoformaGen) return null;
+    const bank = getBankSignatures();
+    let p = null;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const seed = seedBase + (attempt ? "-v" + attempt : "");
+      const cand = window.DuoformaGen.generate(seed, tier);
+      if (!cand) break;
+      p = cand;
+      if (!bank.has(puzzleSignature(cand.given, cand.constraints))) break;
+    }
+    return p;
+  }
+
+  function getChallengePuzzles(dateStr) {
+    if (challengeCache[dateStr]) return challengeCache[dateStr];
+    const levels = [];
+    for (let i = 0; i < CHALLENGE_LEN; i++) {
+      const spec = CHALLENGE_SEQUENCE[i];
+      const p = generateSeededPuzzle(
+        "duoforma-challenge-" + dateStr + "-" + spec.key,
+        spec.tier
+      );
+      if (!p) return null;
+      levels.push({
+        id: "challenge-" + dateStr + "-" + i,
+        given: p.given,
+        solution: p.solution,
+        constraints: p.constraints,
+        tier: spec.tier,
+        label: DAILY_TIER_LABELS[spec.tier],
+      });
+    }
+    challengeCache[dateStr] = levels;
+    return levels;
+  }
+
+  // Streak / fastest helpers shared by Daily and Challenge result maps.
+  function computeResultStats(results) {
+    const dates = Object.keys(results || {});
     const played = dates.length;
     let fastest = Infinity;
-    // Streaks only count dailies solved on their own live day. Archived
-    // (previous-day) plays are practice: playable and shareable, but they
-    // never build or restore a streak. Legacy results (no `live` field) are
-    // grandfathered in as live so existing streaks aren't wiped.
     const dayNums = new Set();
     for (const ds of dates) {
       if (results[ds].live !== false) dayNums.add(dayNumber(ds));
       const t = results[ds].time;
       if (typeof t === "number" && t < fastest) fastest = t;
     }
-    // best streak: longest run of consecutive day numbers
     let best = 0;
     for (const n of dayNums) {
-      if (dayNums.has(n - 1)) continue; // not a run start
+      if (dayNums.has(n - 1)) continue;
       let len = 1;
       while (dayNums.has(n + len)) len++;
       if (len > best) best = len;
     }
-    // current streak: consecutive days ending today (or yesterday, grace period)
     const today = dayNumber(dateStrForOffset(0));
     let cur = 0;
     let anchor = dayNums.has(today) ? today : dayNums.has(today - 1) ? today - 1 : null;
@@ -358,6 +425,15 @@
       while (dayNums.has(anchor - cur)) cur++;
     }
     return { played, best, current: cur, fastest: fastest === Infinity ? null : fastest };
+  }
+
+  // ---------- daily: streak stats ----------
+  function computeDailyStats() {
+    return computeResultStats(dailyData.results);
+  }
+
+  function computeChallengeStats() {
+    return computeResultStats(dailyData.challenge);
   }
 
   // ---------- init ----------
@@ -373,21 +449,29 @@
     }
     wireEvents();
     applyValidateUI();
-    // A shared link (?daily or ?daily=YYYY-MM-DD) always opens on the Daily
-    // tab, deep-linking to the specific day when one is given.
-    const deepLink = window.DuoformaGen ? parseDailyDeepLink() : null;
-    if (deepLink) {
-      localStorage.setItem(MODE_KEY, "daily");
-      loadDaily(deepLink.dateStr ? offsetForDateStr(deepLink.dateStr) : 0);
-      window.addEventListener("resize", positionConstraints);
-      return;
+    // Shared links deep-link into Daily (?daily=…) or Challenge (?challenge=…).
+    if (window.DuoformaGen) {
+      const challengeLink = parseChallengeDeepLink();
+      if (challengeLink) {
+        localStorage.setItem(MODE_KEY, "challenge");
+        loadChallenge(challengeLink.dateStr ? offsetForDateStr(challengeLink.dateStr) : 0);
+        window.addEventListener("resize", positionConstraints);
+        return;
+      }
+      const deepLink = parseDailyDeepLink();
+      if (deepLink) {
+        localStorage.setItem(MODE_KEY, "daily");
+        loadDaily(deepLink.dateStr ? offsetForDateStr(deepLink.dateStr) : 0);
+        window.addEventListener("resize", positionConstraints);
+        return;
+      }
     }
     let mode = localStorage.getItem(MODE_KEY);
     // New visitors land on the Daily puzzle to showcase it; the ★ Daily tab
     // stays available for everyone. Fall back to easy if the generator is
     // unavailable (e.g. opened without puzzle-gen.js).
     if (!mode) mode = window.DuoformaGen ? "daily" : "easy";
-    if (mode === "daily" && !window.DuoformaGen) mode = "easy";
+    if ((mode === "daily" || mode === "challenge") && !window.DuoformaGen) mode = "easy";
     selectDiff(mode);
     window.addEventListener("resize", positionConstraints);
   }
@@ -416,7 +500,10 @@
 
   // ---------- load a level ----------
   // Apply the current state.level to the board (shared by bank + daily modes).
-  function applyLevelToBoard() {
+  // opts.keepChallengeRun: advancing within a Challenge series — keep the
+  // shared countdown and accumulated hint count; do not restart the clock.
+  function applyLevelToBoard(opts) {
+    const keepRun = !!(opts && opts.keepChallengeRun);
     const n = Math.round(Math.sqrt(state.level.given.length));
     if (n !== builtSize) {
       setBoardSize(n);
@@ -426,8 +513,9 @@
     state.grid = new Int8Array(CELLS).fill(EMPTY);
     state.locked = new Array(CELLS).fill(false);
     state.history = [];
-    state.hintsUsed = 0;
+    if (!keepRun) state.hintsUsed = 0;
     state.won = false;
+    state.challengeFailed = false;
 
     const given = state.level.given;
     for (let i = 0; i < CELLS; i++) {
@@ -437,7 +525,7 @@
       }
     }
 
-    resetTimer();
+    if (!keepRun) resetTimer();
     resetHintCooldown();
     resetHintMode();
     renderConstraints();
@@ -447,8 +535,17 @@
     updateCheckpointUI();
   }
 
-  function loadLevel(index) {
+  function clearDailyModeFlags() {
     state.daily = false;
+    state.dailyMeta = null;
+    state.challenge = false;
+    state.challengeMeta = null;
+    state.challengeIndex = 0;
+    state.challengeFailed = false;
+  }
+
+  function loadLevel(index) {
+    clearDailyModeFlags();
     state.index = clampIndex(index);
     state.level = LEVELS[state.diff][state.index];
     progress[state.diff].last = state.index;
@@ -467,6 +564,7 @@
       showBanner("Daily puzzle unavailable.", "bad");
       return;
     }
+    clearDailyModeFlags();
     state.daily = true;
     state.dailyOffset = offset;
     state.diff = "daily";
@@ -497,6 +595,55 @@
     loadDaily(offsetForDateStr(dateStr));
   }
 
+  // Load the Daily Challenge series for the given archive offset (starts at
+  // puzzle 1/4 with a fresh 3:00 countdown).
+  function loadChallenge(offset) {
+    if (offset > 0) offset = 0;
+    const earliest = 1 - dayNumber(dateStrForOffset(0));
+    if (offset < earliest) offset = earliest;
+    const dateStr = dateStrForOffset(offset);
+    const levels = getChallengePuzzles(dateStr);
+    if (!levels) {
+      showBanner("Challenge unavailable.", "bad");
+      return;
+    }
+    clearDailyModeFlags();
+    state.challenge = true;
+    state.challengeOffset = offset;
+    state.challengeIndex = 0;
+    state.diff = "challenge";
+    state.challengeMeta = {
+      dateStr,
+      number: dayNumber(dateStr),
+    };
+    state.level = levels[0];
+    applyLevelToBoard();
+  }
+
+  function shiftChallenge(delta) {
+    loadChallenge(state.challengeOffset + delta);
+  }
+
+  function loadChallengeDate(dateStr) {
+    if (!window.DuoformaGen) return;
+    localStorage.setItem(MODE_KEY, "challenge");
+    loadChallenge(offsetForDateStr(dateStr));
+  }
+
+  // Advance to the next board in the series without resetting the shared clock.
+  function advanceChallenge() {
+    const meta = state.challengeMeta;
+    const levels = getChallengePuzzles(meta.dateStr);
+    if (!levels) return;
+    state.challengeIndex++;
+    state.level = levels[state.challengeIndex];
+    applyLevelToBoard({ keepChallengeRun: true });
+    showBanner(
+      `Puzzle ${state.challengeIndex + 1}/${CHALLENGE_LEN} · ${state.level.label}`,
+      "good"
+    );
+  }
+
   // Read an optional deep-link that points at the daily tab. Supports
   //   ?daily            -> today's daily
   //   ?daily=YYYY-MM-DD -> a specific (past) daily
@@ -507,6 +654,20 @@
       const val = params.get("daily");
       if (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) return { dateStr: val };
       return { dateStr: null }; // today
+    } catch (e) {
+      return null;
+    }
+  }
+
+  //   ?challenge            -> today's challenge
+  //   ?challenge=YYYY-MM-DD -> a specific (past) challenge
+  function parseChallengeDeepLink() {
+    try {
+      const params = new URLSearchParams(location.search);
+      if (!params.has("challenge")) return null;
+      const val = params.get("challenge");
+      if (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) return { dateStr: val };
+      return { dateStr: null };
     } catch (e) {
       return null;
     }
@@ -729,9 +890,11 @@
   // ---------- win ----------
   function onWin() {
     state.won = true;
-    stopTimer();
     cancelErrorDisplay();
     clearErrorStyles();
+    if (isChallenge()) return onWinChallenge();
+    stopTimer();
+    if (el.winTitle) el.winTitle.textContent = "Solved! 🎉";
     if (isDaily()) return onWinDaily();
     const set = solvedSet(state.diff);
     set.add(state.level.id);
@@ -783,6 +946,7 @@
     let note = "";
     if (!isLiveToday) note = " · practice — streak unaffected";
     else if (prior) note = " · (already logged — replay)";
+    if (el.winTitle) el.winTitle.textContent = "Solved! 🎉";
     el.winStats.textContent =
       `Daily #${meta.number} · ${meta.label} · ${formatTime(result.time)} · ${hintsLabel(result.hints)}` +
       note;
@@ -793,6 +957,66 @@
     el.winShare.onclick = () => shareDaily(meta.dateStr);
     // In daily mode "Next" surfaces the social stats view instead of a next level.
     el.winNext.textContent = "View stats →";
+    el.winModal.hidden = false;
+    updateCheckpointUI();
+  }
+
+  function onWinChallenge() {
+    // Intermediate clear — keep the countdown running and load the next board.
+    if (state.challengeIndex < CHALLENGE_LEN - 1) {
+      state.won = false;
+      updateCheckpointUI();
+      advanceChallenge();
+      return;
+    }
+    stopTimer();
+    const meta = state.challengeMeta;
+    const isLiveToday = state.challengeOffset === 0;
+    const prior = dailyData.challenge[meta.dateStr];
+    if (!prior) {
+      dailyData.challenge[meta.dateStr] = {
+        time: state.elapsed,
+        hints: state.hintsUsed,
+        live: isLiveToday,
+      };
+      saveDaily();
+    }
+    updateStatus();
+    const result = dailyData.challenge[meta.dateStr];
+    const stats = computeChallengeStats();
+    let note = "";
+    if (!isLiveToday) note = " · practice — streak unaffected";
+    else if (prior) note = " · (already logged — replay)";
+    if (el.winTitle) el.winTitle.textContent = "Challenge cleared! 🎉";
+    el.winStats.textContent =
+      `Challenge #${meta.number} · ${formatTime(result.time)} / 3:00 · ${hintsLabel(result.hints)}` +
+      note;
+    el.winShareCard.textContent = buildChallengeShareText(meta.dateStr, result, stats);
+    el.winShareCard.hidden = false;
+    el.winShareLabel.textContent = "Share your time";
+    el.winShare.hidden = false;
+    el.winShare.onclick = () => shareChallenge(meta.dateStr);
+    el.winNext.textContent = "View stats →";
+    el.winModal.hidden = false;
+    updateCheckpointUI();
+  }
+
+  function onChallengeTimeout() {
+    if (!isChallenge() || state.won || state.challengeFailed) return;
+    state.challengeFailed = true;
+    state.won = true; // lock the board
+    stopTimer();
+    if (state.hintMode) exitHintMode();
+    cancelErrorDisplay();
+    clearErrorStyles();
+    updateStatus();
+    const cleared = state.challengeIndex; // puzzles fully cleared before the fail
+    if (el.winTitle) el.winTitle.textContent = "Time's up";
+    el.winStats.textContent =
+      `Cleared ${cleared}/${CHALLENGE_LEN} · try again tomorrow — or practice now.`;
+    el.winShareCard.hidden = true;
+    el.winShare.hidden = true;
+    el.winNext.textContent = "Try again →";
     el.winModal.hidden = false;
     updateCheckpointUI();
   }
@@ -818,6 +1042,17 @@
     if (stats && stats.current > 1) lines.push(`🔥 ${stats.current}-day streak`);
     // Deep-link straight to this day's daily so friends play the same board.
     lines.push(`Beat my time → ${siteUrl()}?daily=${dateStr}`);
+    return lines.join("\n");
+  }
+
+  function buildChallengeShareText(dateStr, result, stats) {
+    const num = dayNumber(dateStr);
+    const lines = [
+      `Duoforma Challenge #${num} ⚡`,
+      `⏱ ${formatTime(result.time)} / 3:00 · 4/4 clear · ${hintsLabel(result.hints)}`,
+    ];
+    if (stats && stats.current > 1) lines.push(`🔥 ${stats.current}-day streak`);
+    lines.push(`Beat my time → ${siteUrl()}?challenge=${dateStr}`);
     return lines.join("\n");
   }
 
@@ -865,6 +1100,25 @@
     showBanner(ok ? "Result copied — paste to share!" : "Couldn't copy result.", ok ? "good" : "bad");
   }
 
+  async function shareChallenge(dateStr) {
+    const result = dailyData.challenge[dateStr];
+    if (!result) {
+      showBanner("Clear today's challenge first!", "bad");
+      return;
+    }
+    const text = buildChallengeShareText(dateStr, result, computeChallengeStats());
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Duoforma Challenge", text });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+      }
+    }
+    const ok = await copyText(text);
+    showBanner(ok ? "Result copied — paste to share!" : "Couldn't copy result.", ok ? "good" : "bad");
+  }
+
   async function copyText(text) {
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -888,42 +1142,62 @@
     }
   }
 
-  // ---------- daily: stats modal ----------
+  // ---------- daily: stats / leaderboard modal ----------
+  function renderHistoryList(target, results, mode) {
+    let html = "";
+    for (let off = 0; off > -14; off--) {
+      const ds = dateStrForOffset(off);
+      if (dayNumber(ds) < 1) break;
+      const res = results[ds];
+      const num = dayNumber(ds);
+      const mid =
+        mode === "challenge"
+          ? `<span class="hist-diff">2E · 1M · 1H</span>`
+          : `<span class="hist-diff">${DAILY_TIER_LABELS[dailyTierFor(ds)]}</span>`;
+      const right = res
+        ? `<span class="hist-time">${formatTime(res.time)}</span>`
+        : `<span class="hist-open">play ›</span>`;
+      html +=
+        `<li class="hist-row play${res ? " done" : ""}" data-date="${ds}" data-mode="${mode}" role="button" tabindex="0" title="Play this day">` +
+        `<span class="hist-day">#${num} · ${weekdayLabel(ds)}</span>` +
+        mid +
+        right +
+        `</li>`;
+    }
+    target.innerHTML = html;
+  }
+
+  function latestResultDate(results) {
+    for (let off = 0; off > -400; off--) {
+      const ds = dateStrForOffset(off);
+      if (dayNumber(ds) < 1) break;
+      if (results[ds]) return ds;
+    }
+    return null;
+  }
+
   function openStats() {
     const stats = computeDailyStats();
     el.statPlayed.textContent = stats.played;
     el.statStreak.textContent = stats.current;
     el.statBest.textContent = stats.best;
     el.statFastest.textContent = stats.fastest == null ? "–" : formatTime(stats.fastest);
+    renderHistoryList(el.statsHistory, dailyData.results, "daily");
 
-    let html = "";
-    for (let off = 0; off > -14; off--) {
-      const ds = dateStrForOffset(off);
-      if (dayNumber(ds) < 1) break;
-      const res = dailyData.results[ds];
-      const tier = dailyTierFor(ds);
-      const num = dayNumber(ds);
-      const right = res
-        ? `<span class="hist-time">${formatTime(res.time)}</span>`
-        : `<span class="hist-open">play ›</span>`;
-      html +=
-        `<li class="hist-row play${res ? " done" : ""}" data-date="${ds}" role="button" tabindex="0" title="Play this day">` +
-        `<span class="hist-day">#${num} · ${weekdayLabel(ds)}</span>` +
-        `<span class="hist-diff">${DAILY_TIER_LABELS[tier]}</span>` +
-        right +
-        `</li>`;
-    }
-    el.statsHistory.innerHTML = html;
-
-    // Share the most recent completed daily (today if done, else latest).
-    let shareDate = null;
-    for (let off = 0; off > -400; off--) {
-      const ds = dateStrForOffset(off);
-      if (dayNumber(ds) < 1) break;
-      if (dailyData.results[ds]) { shareDate = ds; break; }
-    }
+    const shareDate = latestResultDate(dailyData.results);
     el.statsShare.disabled = !shareDate;
     el.statsShare.onclick = () => shareDate && shareDaily(shareDate);
+
+    const chalStats = computeChallengeStats();
+    el.chalPlayed.textContent = chalStats.played;
+    el.chalStreak.textContent = chalStats.current;
+    el.chalBest.textContent = chalStats.best;
+    el.chalFastest.textContent = chalStats.fastest == null ? "–" : formatTime(chalStats.fastest);
+    renderHistoryList(el.statsChallengeHistory, dailyData.challenge, "challenge");
+
+    const chalShareDate = latestResultDate(dailyData.challenge);
+    el.statsChallengeShare.disabled = !chalShareDate;
+    el.statsChallengeShare.onclick = () => chalShareDate && shareChallenge(chalShareDate);
 
     el.statsModal.hidden = false;
   }
@@ -1248,12 +1522,30 @@
   }
 
   // ---------- timer ----------
+  function paintTimer() {
+    if (isChallenge()) {
+      const remaining = Math.max(0, CHALLENGE_LIMIT_MS - state.elapsed);
+      el.timer.textContent = formatTime(remaining);
+      el.timer.classList.add("countdown");
+      el.timer.classList.toggle("urgent", remaining <= 30000 && remaining > 0);
+    } else {
+      el.timer.textContent = formatTime(state.elapsed);
+      el.timer.classList.remove("countdown", "urgent");
+    }
+  }
+
   function ensureTimer() {
     if (state.timerId) return;
     state.startTime = Date.now() - state.elapsed;
     state.timerId = setInterval(() => {
       state.elapsed = Date.now() - state.startTime;
-      el.timer.textContent = formatTime(state.elapsed);
+      if (isChallenge() && state.elapsed >= CHALLENGE_LIMIT_MS) {
+        state.elapsed = CHALLENGE_LIMIT_MS;
+        paintTimer();
+        onChallengeTimeout();
+        return;
+      }
+      paintTimer();
     }, 250);
   }
   function stopTimer() {
@@ -1262,7 +1554,8 @@
       state.timerId = null;
       if (state.startTime) {
         state.elapsed = Date.now() - state.startTime;
-        el.timer.textContent = formatTime(state.elapsed);
+        if (isChallenge()) state.elapsed = Math.min(state.elapsed, CHALLENGE_LIMIT_MS);
+        paintTimer();
       }
     }
   }
@@ -1270,7 +1563,7 @@
     stopTimer();
     state.elapsed = 0;
     state.startTime = 0;
-    el.timer.textContent = "0:00";
+    paintTimer();
   }
   function formatTime(ms) {
     const s = Math.floor(ms / 1000);
@@ -1287,8 +1580,10 @@
 
   function updateStatus() {
     if (isDaily()) return updateStatusDaily();
+    if (isChallenge()) return updateStatusChallenge();
     el.levelLabel.textContent = "Level " + (state.index + 1);
     el.dailyDiff.hidden = true;
+    el.dailyDiff.classList.remove("challenge-badge");
     el.dailyStreak.hidden = true;
     el.randomBtn.style.display = ""; // .nav-btn display beats the [hidden] attr
     el.levelBtn.title = "Pick a level";
@@ -1304,9 +1599,10 @@
     const meta = state.dailyMeta;
     el.levelLabel.textContent = meta.dateStr === dateStrForOffset(0) ? "Today" : weekdayLabel(meta.dateStr);
     el.dailyDiff.textContent = meta.label;
+    el.dailyDiff.classList.remove("challenge-badge");
     el.dailyDiff.hidden = false;
     el.randomBtn.style.display = "none";
-    el.levelBtn.title = "Daily stats";
+    el.levelBtn.title = "Daily leaderboard";
     const done = !!dailyData.results[meta.dateStr];
     el.levelDone.hidden = !done;
     el.prevBtn.disabled = meta.number <= 1; // can't go before day #1
@@ -1322,13 +1618,43 @@
     setActiveTab("daily");
   }
 
+  function updateStatusChallenge() {
+    const meta = state.challengeMeta;
+    const step = state.challengeIndex + 1;
+    const label = state.level && state.level.label ? state.level.label : "";
+    el.levelLabel.textContent =
+      meta.dateStr === dateStrForOffset(0) ? "Today" : weekdayLabel(meta.dateStr);
+    el.dailyDiff.textContent = `${step}/${CHALLENGE_LEN} ${label}`;
+    el.dailyDiff.classList.add("challenge-badge");
+    el.dailyDiff.hidden = false;
+    el.randomBtn.style.display = "none";
+    el.levelBtn.title = "Daily leaderboard";
+    const done = !!dailyData.challenge[meta.dateStr];
+    el.levelDone.hidden = !done;
+    el.prevBtn.disabled = meta.number <= 1;
+    el.nextBtn.disabled = state.challengeOffset >= 0;
+    el.progressText.textContent = `Challenge #${meta.number} · 3:00`;
+    const stats = computeChallengeStats();
+    if (stats.current > 0) {
+      el.dailyStreak.textContent = `⚡ ${stats.current}-day streak`;
+      el.dailyStreak.hidden = false;
+    } else {
+      el.dailyStreak.hidden = true;
+    }
+    setActiveTab("challenge");
+  }
+
   function selectDiff(diff) {
     localStorage.setItem(MODE_KEY, diff);
     if (diff === "daily") {
       loadDaily(0);
       return;
     }
-    state.daily = false;
+    if (diff === "challenge") {
+      loadChallenge(0);
+      return;
+    }
+    clearDailyModeFlags();
     state.diff = diff;
     loadLevel(clampIndex(progress[diff].last || 0));
   }
@@ -1409,8 +1735,16 @@
       if (!("ontouchstart" in window)) cycle(Number(cell.dataset.i), true);
     });
 
-    el.prevBtn.addEventListener("click", () => (isDaily() ? shiftDaily(-1) : loadLevel(state.index - 1)));
-    el.nextBtn.addEventListener("click", () => (isDaily() ? shiftDaily(1) : loadLevel(state.index + 1)));
+    el.prevBtn.addEventListener("click", () => {
+      if (isDaily()) shiftDaily(-1);
+      else if (isChallenge()) shiftChallenge(-1);
+      else loadLevel(state.index - 1);
+    });
+    el.nextBtn.addEventListener("click", () => {
+      if (isDaily()) shiftDaily(1);
+      else if (isChallenge()) shiftChallenge(1);
+      else loadLevel(state.index + 1);
+    });
     el.undoBtn.addEventListener("click", undo);
     el.clearBtn.addEventListener("click", requestClear);
     el.hintBtn.addEventListener("click", hint);
@@ -1427,24 +1761,27 @@
     el.closeStats.addEventListener("click", () => (el.statsModal.hidden = true));
     el.dailyStreak.addEventListener("click", openStats);
 
-    // Tap a row in "Recent dailies" to replay that day's puzzle.
+    // Tap a row in recent Daily / Challenge history to replay that day.
     const playHistoryRow = (row) => {
       if (!row || !row.dataset.date) return;
       el.statsModal.hidden = true;
-      loadDailyDate(row.dataset.date);
+      if (row.dataset.mode === "challenge") loadChallengeDate(row.dataset.date);
+      else loadDailyDate(row.dataset.date);
     };
-    el.statsHistory.addEventListener("click", (e) =>
-      playHistoryRow(e.target.closest(".hist-row"))
-    );
-    el.statsHistory.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      const row = e.target.closest(".hist-row");
-      if (!row) return;
-      e.preventDefault();
-      playHistoryRow(row);
-    });
+    const wireHistoryList = (list) => {
+      list.addEventListener("click", (e) => playHistoryRow(e.target.closest(".hist-row")));
+      list.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const row = e.target.closest(".hist-row");
+        if (!row) return;
+        e.preventDefault();
+        playHistoryRow(row);
+      });
+    };
+    wireHistoryList(el.statsHistory);
+    wireHistoryList(el.statsChallengeHistory);
 
-    el.levelBtn.addEventListener("click", () => (isDaily() ? openStats() : openLevelModal()));
+    el.levelBtn.addEventListener("click", () => (isDailyMode() ? openStats() : openLevelModal()));
     el.closeModal.addEventListener("click", () => (el.levelModal.hidden = true));
     el.levelGrid.addEventListener("click", (e) => {
       const b = e.target.closest(".level-cell");
@@ -1468,7 +1805,10 @@
 
     el.winNext.addEventListener("click", () => {
       el.winModal.hidden = true;
-      if (isDaily()) {
+      if (isChallenge()) {
+        if (state.challengeFailed) loadChallenge(state.challengeOffset);
+        else openStats();
+      } else if (isDaily()) {
         openStats();
       } else if (state.index < LEVELS[state.diff].length - 1) {
         loadLevel(state.index + 1);
@@ -1484,9 +1824,15 @@
 
     document.addEventListener("keydown", (e) => {
       if (e.target.tagName === "INPUT") return;
-      if (e.key === "ArrowLeft") isDaily() ? shiftDaily(-1) : loadLevel(state.index - 1);
-      else if (e.key === "ArrowRight") isDaily() ? shiftDaily(1) : loadLevel(state.index + 1);
-      else if (e.key.toLowerCase() === "z" && (e.metaKey || e.ctrlKey)) undo();
+      if (e.key === "ArrowLeft") {
+        if (isDaily()) shiftDaily(-1);
+        else if (isChallenge()) shiftChallenge(-1);
+        else loadLevel(state.index - 1);
+      } else if (e.key === "ArrowRight") {
+        if (isDaily()) shiftDaily(1);
+        else if (isChallenge()) shiftChallenge(1);
+        else loadLevel(state.index + 1);
+      } else if (e.key.toLowerCase() === "z" && (e.metaKey || e.ctrlKey)) undo();
       else if (e.key === "Escape") {
         if (state.hintMode) exitHintMode();
         el.levelModal.hidden = true;
